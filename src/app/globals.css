@@ -1,0 +1,255 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy-950: #070f1a;
+  --color-navy-900: #0c1a2b;
+  --color-navy-800: #172538;
+  --color-navy-700: #21344e;
+  --color-steel-50: #f5f7f9;
+  --color-steel-100: #e8edf2;
+  --color-steel-200: #d0d9e3;
+  --color-steel-300: #a8b8cc;
+  --color-steel-400: #8496b0;
+  --color-steel-500: #64748b;
+  --color-steel-600: #4d5b72;
+  --color-steel-700: #3d4a5e;
+  --color-steel-800: #2d3a4e;
+  --color-steel-900: #1d2a3e;
+  --color-cyan-400: #22b8d9;
+  --color-cyan-500: #0ea5c4;
+  --color-cyan-600: #0891ae;
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-700: #047857;
+  --color-red-50: #fef2f2;
+  --color-red-700: #b91c1c;
+  --color-amber-50: #fffbeb;
+  --color-amber-700: #b45309;
+}
+
+:root {
+  --background: var(--color-steel-50);
+  --foreground: var(--color-navy-900);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--color-navy-950);
+    letter-spacing: -0.015em;
+  }
+
+  ::selection {
+    background-color: var(--color-navy-900);
+    color: #fff;
+  }
+
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 400 900;
+    font-display: swap;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-steel-100);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-navy-700);
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-navy-900);
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  iframe[loading="lazy"],
+  img[loading="lazy"] {
+    content-visibility: auto;
+    contain-intrinsic-size: 1px;
+  }
+}
+
+@layer components {
+  .container-editorial {
+    @apply mx-auto w-full max-w-7xl px-6 lg:px-10;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md
+           bg-navy-900 px-6 py-3 text-sm font-medium text-white
+           transition-all duration-200
+           hover:bg-navy-800 hover:shadow-[0_12px_40px_-24px_rgba(15,23,42,0.35)]
+           active:bg-navy-950
+           focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md
+           border border-navy-900 bg-white px-6 py-3 text-sm font-medium text-navy-900
+           transition-all duration-200
+           hover:bg-navy-900 hover:text-white
+           focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-md
+           px-5 py-2.5 text-sm font-medium text-navy-700
+           transition-colors duration-200
+           hover:bg-steel-100 hover:text-navy-900;
+  }
+
+  .btn-whatsapp {
+    @apply inline-flex items-center justify-center gap-2 rounded-md
+           bg-[#25D366] px-6 py-3 text-sm font-semibold text-white
+           transition-all duration-200
+           hover:bg-[#1fb95a] hover:shadow-[0_12px_40px_-24px_rgba(15,23,42,0.35)]
+           focus:outline-none focus:ring-2 focus:ring-[#25D366] focus:ring-offset-2;
+  }
+
+  .card-editorial {
+    @apply rounded-xl border border-steel-100 bg-white p-6
+           transition-all duration-300
+           hover:border-steel-200 hover:shadow-[0_4px_12px_-4px_rgba(15,23,42,0.15)];
+  }
+
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.18em] text-cyan-600;
+  }
+
+  .h-display {
+    @apply text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.1] tracking-tight text-navy-950;
+  }
+
+  .h-section {
+    @apply text-[clamp(1.5rem,2.5vw,2.25rem)] font-semibold leading-[1.2] tracking-tight text-navy-950;
+  }
+
+  .h-card {
+    @apply text-lg font-semibold leading-tight text-navy-950;
+  }
+
+  .text-body {
+    @apply text-base leading-relaxed text-steel-600;
+  }
+
+  .text-muted {
+    @apply text-sm text-steel-500;
+  }
+
+  .input-base {
+    @apply w-full rounded-md border border-steel-200 bg-white px-4 py-3 text-sm
+           text-navy-900 placeholder:text-steel-400
+           transition-colors
+           focus:border-navy-900 focus:outline-none focus:ring-1 focus:ring-navy-900;
+  }
+
+  .label-base {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-800;
+  }
+
+  .tag {
+    @apply inline-flex items-center rounded-full border border-steel-200 bg-white
+           px-3 py-1 text-xs font-medium text-steel-700;
+  }
+
+  .tag-dark {
+    @apply inline-flex items-center rounded-full bg-navy-900 px-3 py-1
+           text-xs font-semibold uppercase tracking-wide text-white;
+  }
+
+  .divider-thin {
+    @apply h-px w-full bg-steel-200;
+  }
+}
+
+@layer utilities {
+  .hover-lift {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_-24px_rgba(15,23,42,0.35)];
+  }
+
+  .text-accent-gradient {
+    background: linear-gradient(135deg, #22b8d9 0%, #0ea5c4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .glass-navy {
+    background: rgba(7, 15, 26, 0.85);
+    backdrop-filter: blur(12px);
+  }
+
+  .section {
+    @apply py-16 md:py-24;
+  }
+
+  .section-lg {
+    @apply py-20 md:py-32;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  #main {
+    flex: 1;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  .container-editorial {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .btn-primary, .btn-secondary, .btn-ghost, .btn-whatsapp {
+    width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .card-editorial {
+    padding: 1.5rem !important;
+  }
+}

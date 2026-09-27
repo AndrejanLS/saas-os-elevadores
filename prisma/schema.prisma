@@ -1,0 +1,199 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  SUPERVISOR
+  TECHNICIAN
+}
+
+enum ServiceOrderStatus {
+  DRAFT
+  COMPLETED
+  CANCELLED
+}
+
+enum MaintenanceSituation {
+  NORMAL
+  WITH_NOTES
+  QUOTE_REQUIRED
+  IRREGULARITY
+}
+
+model Company {
+  id           String         @id @default(uuid())
+  legalName    String
+  tradeName    String?
+  taxId        String?
+  address      String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String?
+  state        String?
+  postalCode   String?
+  phone        String?
+  whatsapp     String?
+  email        String?
+  website      String?
+  logoObjectKey String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  users        User[]
+  customers    Customer[]
+  elevators    Elevator[]
+  serviceOrders ServiceOrder[]
+  photos       Photo[]
+  signatures   Signature[]
+  @@index([taxId])
+}
+
+model User {
+  id           String         @id @default(uuid())
+  companyId    String
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  email        String
+  passwordHash String
+  role         UserRole       @default(TECHNICIAN)
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  createdOrders ServiceOrder[] @relation("OrderTechnician")
+  records      ServiceRecord[]
+  photos       Photo[]
+  @@unique([companyId, email])
+  @@index([companyId, active])
+}
+
+model Customer {
+  id          String         @id @default(uuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  taxId       String?
+  address     String?
+  number      String?
+  complement  String?
+  neighborhood String?
+  city        String?
+  state       String?
+  postalCode  String?
+  contactName String?
+  phone       String?
+  email       String?
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  elevators   Elevator[]
+  serviceOrders ServiceOrder[]
+  @@index([companyId, name])
+}
+
+model Elevator {
+  id           String         @id @default(uuid())
+  companyId    String
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  identification String
+  number       String?
+  manufacturer String?
+  model        String?
+  capacity     String?
+  stops        String?
+  location     String?
+  type         String?
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  serviceOrders ServiceOrder[]
+  @@index([companyId, customerId])
+}
+
+model ServiceOrder {
+  id              String              @id @default(uuid())
+  companyId       String
+  company         Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  number          Int
+  customerId      String
+  customer        Customer            @relation(fields: [customerId], references: [id])
+  elevatorId      String
+  elevator        Elevator            @relation(fields: [elevatorId], references: [id])
+  technicianId    String
+  technician      User                @relation("OrderTechnician", fields: [technicianId], references: [id])
+  status          ServiceOrderStatus  @default(DRAFT)
+  situation      MaintenanceSituation?
+  startTime       DateTime?
+  endTime         DateTime?
+  responsibleName String?
+  responsibleRole String?
+  generalNotes   String?
+  servicesNotes  String?
+  findingsNotes  String?
+  openedAt       DateTime             @default(now())
+  completedAt    DateTime?
+  updatedAt      DateTime             @updatedAt
+  records        ServiceRecord[]
+  photos         Photo[]
+  signature      Signature?
+  @@unique([companyId, number])
+  @@index([companyId, status, openedAt])
+  @@index([companyId, customerId])
+  @@index([companyId, elevatorId])
+}
+
+model ServiceRecord {
+  id            String       @id @default(uuid())
+  companyId     String
+  serviceOrderId String
+  authorId      String
+  part          String
+  customPart    String?
+  notes         String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  order         ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  author        User         @relation(fields: [authorId], references: [id])
+  photos        Photo[]
+  @@index([companyId, serviceOrderId])
+}
+
+model Photo {
+  id            String         @id @default(uuid())
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  serviceOrderId String
+  order         ServiceOrder   @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceRecordId String?
+  record        ServiceRecord? @relation(fields: [serviceRecordId], references: [id], onDelete: Cascade)
+  uploadedById  String
+  uploadedBy    User           @relation(fields: [uploadedById], references: [id])
+  objectKey     String
+  mimeType      String
+  sizeBytes     Int
+  originalName  String?
+  caption       String?
+  createdAt     DateTime       @default(now())
+  @@index([companyId, serviceOrderId])
+  @@index([serviceRecordId])
+}
+
+model Signature {
+  id             String       @id @default(uuid())
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  serviceOrderId String       @unique
+  order          ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  objectKey      String
+  signerName     String
+  signerRole     String?
+  consentText    String?
+  createdAt      DateTime     @default(now())
+}
