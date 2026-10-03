@@ -14,15 +14,15 @@ function joinParts(parts: Array<string | null | undefined>): string {
   return parts.filter((p) => p && String(p).trim()).join(", ");
 }
 function formatDate(value: string | Date | null | undefined): string {
-  if (!value) return "—";
+  if (!value) return "--";
   const d = new Date(value);
-  if (isNaN(d.getTime())) return "—";
+  if (isNaN(d.getTime())) return "--";
   return d.toLocaleDateString("pt-BR");
 }
 function formatTime(value: string | Date | null | undefined): string {
-  if (!value) return "—";
+  if (!value) return "--";
   const d = new Date(value);
-  if (isNaN(d.getTime())) return "—";
+  if (isNaN(d.getTime())) return "--";
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
@@ -43,25 +43,41 @@ const C = {
   sectionBg: rgb(241/255, 245/255, 249/255),
 };
 
-const COL_W = CONTENT_W / 2 - 10; // largura de cada coluna (menos gap)
+const COL_W = CONTENT_W / 2 - 10;
 const LABEL_SIZE = 7;
 const VALUE_SIZE = 9;
 const LINE_H_LABEL = LABEL_SIZE * 1.3;
 const LINE_H_VALUE = VALUE_SIZE * 1.4;
 
+// Sanitiza texto para WinAnsi
+function sanitizeText(text: string): string {
+  if (!text) return "--";
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\x20-\x7EÀ-ÿ]/g, "");
+}
+
+function drawTextSafely(page: any, text: string, opts: any) {
+  try {
+    page.drawText(sanitizeText(text), opts);
+  } catch {
+    page.drawText("[texto com erro]", opts);
+  }
+}
+
 function drawFieldPair(page: any, x: number, y: number, label: string, value: string, font: any, fontB: any): number {
-  // Label
-  page.drawText(label, { x, y, size: LABEL_SIZE, font, color: C.medText });
-  // Valor com wrap
+  const safeLabel = sanitizeText(label);
+  const safeValue = sanitizeText(value);
+  drawTextSafely(page, safeLabel, { x, y, size: LABEL_SIZE, font, color: C.medText });
   const maxW = COL_W - 4;
-  const valueLines = splitTextToLines(value, maxW, VALUE_SIZE, fontB);
+  const valueLines = splitTextToLines(safeValue, maxW, VALUE_SIZE, fontB);
   let vy = y - LINE_H_LABEL - 2;
   for (const line of valueLines) {
-    page.drawText(line, { x, y: vy, size: VALUE_SIZE, font: fontB, color: C.darkText });
+    drawTextSafely(page, line, { x, y: vy, size: VALUE_SIZE, font: fontB, color: C.darkText });
     vy -= LINE_H_VALUE;
   }
-  // Retorna a altura total usada (label + gap + linhas do valor)
-  return LINE_H_LABEL + 2 + valueLines.length * LINE_H_VALUE + 6; // +6 padding extra
+  return LINE_H_LABEL + 2 + valueLines.length * LINE_H_VALUE + 6;
 }
 
 function splitTextToLines(text: string, maxWidth: number, size: number, font: any): string[] {
@@ -81,9 +97,30 @@ function splitTextToLines(text: string, maxWidth: number, size: number, font: an
   return lines.length ? lines : ["—"];
 }
 
-async function loadImageBytes(dataUrl: string): Promise<Uint8Array> {
-  const res = await fetch(dataUrl);
-  return res.arrayBuffer().then((buf) => new Uint8Array(buf));
+// Decodifica dataURL para bytes
+function extractImageData(dataUrl: string): { bytes: Uint8Array; isPng: boolean } | null {
+  if (typeof dataUrl !== "string") return null;
+  const idx = dataUrl.indexOf(",");
+  if (idx < 0) return null;
+  const header = dataUrl.substring(0, idx);
+  const isPng = /png/i.test(header);
+  const isJpg = /jpe?g/i.test(header);
+  if (!isPng && !isJpg) return null;
+  const base64Data = dataUrl.substring(idx + 1);
+  if (!base64Data) return null;
+  try {
+    const bytes = Buffer.from(base64Data, "base64");
+    return { bytes: new Uint8Array(bytes), isPng };
+  } catch {
+    return null;
+  }
+}
+
+async function embedImageFromDataUrl(pdfDoc: any, dataUrl: string) {
+  const extracted = extractImageData(dataUrl);
+  if (!extracted) return null;
+  const { bytes, isPng } = extracted;
+  return isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
 }
 
 function drawWrapped(
@@ -95,24 +132,57 @@ function drawWrapped(
   color: any,
   font: any,
   maxWidth: number,
-  lineHeight: number
-) {
-  const words = text.split(" ");
-  let line = "";
+  lineHeight: number,
+  pdfDoc: any,
+  fontB: any
+): { page: any; y: number } {
+  const rawText = text || "";
+  const paragraphs = rawText.split(/\r?\n/);
   let curY = y;
-  for (const word of words) {
-    const test = line + (line ? " " : "") + word;
-    const w = font.widthOfTextAtSize(test, size);
-    if (w > maxWidth && line) {
-      page.drawText(line, { x, y: curY, size, font, color });
+  let currentPage = page;
+  const minY = M + 50; // Não desenha abaixo do footer
+
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      // Se linha vazia e vai estourar, quebra página
+      if (curY - lineHeight * 0.6 < minY) {
+        currentPage = pdfDoc.addPage([PAGE_W, PAGE_H]);
+        curY = PAGE_H - M;
+      } else {
+        curY -= lineHeight * 0.6;
+      }
+      continue;
+    }
+    const safePara = sanitizeText(para);
+    const words = safePara.split(" ");
+    let line = "";
+    for (const word of words) {
+      const test = line + (line ? " " : "") + word;
+      const w = font.widthOfTextAtSize(test, size);
+      if (w > maxWidth && line) {
+        // Quebra de página se necessário
+        if (curY - lineHeight < minY) {
+          currentPage = pdfDoc.addPage([PAGE_W, PAGE_H]);
+          curY = PAGE_H - M;
+        }
+        drawTextSafely(currentPage, line, { x, y: curY, size, font, color });
+        curY -= lineHeight;
+        line = word;
+      } else {
+        line = test;
+      }
+    }
+    if (line) {
+      // Quebra de página se necessário
+      if (curY - lineHeight < minY) {
+        currentPage = pdfDoc.addPage([PAGE_W, PAGE_H]);
+        curY = PAGE_H - M;
+      }
+      drawTextSafely(currentPage, line, { x, y: curY, size, font, color });
       curY -= lineHeight;
-      line = word;
-    } else {
-      line = test;
     }
   }
-  if (line) page.drawText(line, { x, y: curY, size, font, color });
-  return curY;
+  return { page: currentPage, y: curY };
 }
 
 function drawSectionTitle(page: any, title: string, y: number, fontB: any) {
@@ -126,10 +196,118 @@ function drawSectionTitle(page: any, title: string, y: number, fontB: any) {
     thickness: 1.2, color: C.headerLine,
   });
   const text = title.toUpperCase();
-  page.drawText(text, {
+  drawTextSafely(page, text, {
     x: M + 8, y: y - 10, size: 10, font: fontB, color: rgb(1, 1, 1),
   });
   return y - boxH - 6;
+}
+
+// === LAYOUT HELPERS ===
+
+// Calcula altura necessária para texto com wrap (preservando quebras de linha)
+function measureTextHeight(text: string, maxWidth: number, size: number, font: any, lineHeight: number): number {
+  if (!text?.trim()) return 0;
+  const safeText = sanitizeText(text);
+  const paragraphs = safeText.split(/\r?\n/);
+  let totalLines = 0;
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      totalLines += 0.6; // linha em branco conta parcial
+      continue;
+    }
+    const words = para.split(" ");
+    let line = "";
+    let lines = 0;
+    for (const word of words) {
+      const test = line + (line ? " " : "") + word;
+      if (font.widthOfTextAtSize(test, size) > maxWidth && line) {
+        lines++;
+        line = word;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines++;
+    totalLines += lines;
+  }
+  return Math.ceil(totalLines) * lineHeight;
+}
+
+// Verifica se há espaço suficiente na página atual
+function ensureSpace(page: any, y: number, neededHeight: number, pdfDoc: any, fontB: any): { page: any; y: number } {
+  const minBottomMargin = M + 30; // margem inferior + footer
+  if (y - neededHeight < minBottomMargin) {
+    page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+    y = PAGE_H - M;
+  }
+  return { page, y };
+}
+
+// Desenha a área de assinatura completa (com ou sem imagem)
+async function drawSignatureSection(page: any, y: number, signature: string | null, pdfDoc: any, helvetica: any, helveticaBold: any, company: AnyRecord, customer: AnyRecord): Promise<{ page: any; y: number }> {
+  const minSignatureHeight = 120; // altura mínima reservada para assinatura
+  const result = ensureSpace(page, y, minSignatureHeight, pdfDoc, helveticaBold);
+  page = result.page;
+  y = result.y;
+
+  // Título da seção
+  y = drawSectionTitle(page, "Assinatura do Responsável", y, helveticaBold);
+
+  // Espaço após título
+  y -= 8;
+
+  // Linha para "Responsável pela aprovação"
+  drawTextSafely(page, "RESPONSÁVEL PELA APROVAÇÃO", { x: M, y, size: 9, font: helveticaBold, color: C.teal });
+  y -= 18;
+
+  // Campo: Nome
+  drawTextSafely(page, "Nome:", { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
+  drawTextSafely(page, "_______________________________________________", { x: M + 60, y, size: 8, font: helvetica, color: C.medText });
+  y -= 16;
+
+  // Campo: Data
+  const today = new Date().toLocaleDateString("pt-BR");
+  drawTextSafely(page, "Data:", { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
+  drawTextSafely(page, today, { x: M + 60, y, size: 8, font: helvetica, color: C.darkText });
+  y -= 16;
+
+  // Campo: Assinatura
+  drawTextSafely(page, "Assinatura:", { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
+  y -= 10;
+
+  // Se há assinatura digital, desenha a imagem
+  if (signature?.startsWith("data:image/")) {
+    try {
+      const img = await embedImageFromDataUrl(pdfDoc, signature);
+      if (img) {
+        const ratio = img.width / img.height;
+        const maxW = 280;
+        const maxH = 100;
+        let w = maxW, h = w / ratio;
+        if (h > maxH) { h = maxH; w = h * ratio; }
+        page.drawImage(img, { x: M, y: y - h, width: w, height: h });
+        y -= h + 10;
+      }
+    } catch (e) {
+      console.error('[PDF] failed to embed signature:', e);
+      // Fallback: linha para assinatura manuscrita
+      page.drawLine({ start: { x: M, y }, end: { x: M + 280, y }, thickness: 0.8, color: C.border });
+      y -= 20;
+    }
+  } else {
+    // Sem assinatura digital: desenha linha para assinatura manuscrita
+    page.drawLine({ start: { x: M, y }, end: { x: M + 280, y }, thickness: 0.8, color: C.border });
+    y -= 20;
+  }
+
+  // Linha de identificação do responsável (se houver nome)
+  const respName = customer.contactName || "";
+  if (respName) {
+    drawTextSafely(page, respName, { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
+    y -= 12;
+  }
+
+  return { page, y };
 }
 
 export async function POST(req: NextRequest) {
@@ -147,6 +325,7 @@ export async function POST(req: NextRequest) {
       responsibleRole = "",
       technicianName = "",
       generalNotes = "",
+      signature = null,
       orderNumber = 0,
     } = body;
 
@@ -161,28 +340,27 @@ export async function POST(req: NextRequest) {
     // Header: logo + title
     if (company.logoObjectKey?.startsWith("data:image/")) {
       try {
-        const imgBytes = await loadImageBytes(company.logoObjectKey);
-        const img = company.logoObjectKey.startsWith("data:image/png") || company.logoObjectKey.startsWith("data:image/png;")
-          ? await pdfDoc.embedPng(imgBytes)
-          : await pdfDoc.embedJpg(imgBytes);
-        const ratio = img.width / img.height;
-        const maxW = 156, maxH = 56;
-        let w = maxW, h = w / ratio;
-        if (h > maxH) { h = maxH; w = h * ratio; }
-        page.drawImage(img, { x: M, y: y - h, width: w, height: h });
-        y -= h + 8;
+        const img = await embedImageFromDataUrl(pdfDoc, company.logoObjectKey);
+        if (img) {
+          const ratio = img.width / img.height;
+          const maxW = 156, maxH = 56;
+          let w = maxW, h = w / ratio;
+          if (h > maxH) { h = maxH; w = h * ratio; }
+          page.drawImage(img, { x: M, y: y - h, width: w, height: h });
+          y -= h + 8;
+        }
       } catch {}
     }
 
-    page.drawText("ORDEM DE SERVIÇO", {
+    drawTextSafely(page, "ORDEM DE SERVIÇO", {
       x: PAGE_W - M - helveticaBold.widthOfTextAtSize("ORDEM DE SERVIÇO", 14), y: y - 4, size: 14, font: helveticaBold, color: C.teal,
     });
     const numberLabel = orderNumber > 0 ? `OS Nº ${String(orderNumber).padStart(6, "0")}` : "OS Nº — (rascunho)";
-    page.drawText(numberLabel, {
+    drawTextSafely(page, numberLabel, {
       x: PAGE_W - M - helveticaBold.widthOfTextAtSize(numberLabel, 10), y: y - 22, size: 10, font: helveticaBold, color: C.navy,
     });
     const dateLabel = `Emitida em ${formatDate(new Date())}`;
-    page.drawText(dateLabel, {
+    drawTextSafely(page, dateLabel, {
       x: PAGE_W - M - helvetica.widthOfTextAtSize(dateLabel, 8), y: y - 36, size: 8, font: helvetica, color: C.medText,
     });
     y -= 50;
@@ -269,9 +447,17 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < records.length; i++) {
         const record = records[i];
         const caption = record.customPart || record.part || `Registro ${i + 1}`;
-        page.drawText(`REGISTRO ${i + 1} · ${caption}`, { x: M, y, size: 9, font: helveticaBold, color: C.teal });
+
+        // Verifica espaço antes do registro
+        const recordEstHeight = 14 + measureTextHeight(record.notes || "", CONTENT_W, 9, helvetica, 13) + 20;
+        const { page: newPage, y: newY } = ensureSpace(page, y, recordEstHeight, pdfDoc, helveticaBold);
+        page = newPage; y = newY;
+
+        drawTextSafely(page, `REGISTRO ${i + 1} · ${caption}`, { x: M, y, size: 9, font: helveticaBold, color: C.teal });
         y -= 14;
-        y = drawWrapped(page, record.notes || "", M, y, 9, C.darkText, helvetica, CONTENT_W, 13);
+        const wrappedResult = drawWrapped(page, record.notes || "", M, y, 9, C.darkText, helvetica, CONTENT_W, 13, pdfDoc, helveticaBold);
+        page = wrappedResult.page;
+        y = wrappedResult.y;
 
         const photos: string[] = (record.photos || [])
           .map((p: any) => (typeof p === "string" ? p : p?.objectKey))
@@ -287,10 +473,8 @@ export async function POST(req: NextRequest) {
           let drew1 = false, drew2 = false;
           let h1 = 0, h2 = 0;
           try {
-            const imgBytes1 = await loadImageBytes(photos[p]);
-            const img1 = photos[p].startsWith("data:image/png") || photos[p].startsWith("data:image/png;")
-              ? await pdfDoc.embedPng(imgBytes1)
-              : await pdfDoc.embedJpg(imgBytes1);
+            const img1 = await embedImageFromDataUrl(pdfDoc, photos[p]);
+            if (!img1) throw new Error('not a data URL');
             const r1 = img1.width / img1.height;
             let w1 = photoW, h1calc = w1 / r1;
             if (h1calc > photoH) { h1calc = photoH; w1 = h1calc * r1; }
@@ -300,18 +484,15 @@ export async function POST(req: NextRequest) {
           } catch (e) {
             console.error('[PDF] failed to embed photo 1:', e);
           }
-          // Desenha moldura só se desenhou a imagem, senão pula o slot
           if (drew1) {
             page.drawRectangle({ x: x1, y: y - photoH, width: photoW, height: photoH, borderColor: C.border, borderWidth: 0.5 });
-            page.drawText(`${caption} ${p + 1}`, { x: x1 + 4, y: y - photoH - 10, size: 7, font: helvetica, color: C.medText });
+            drawTextSafely(page, `${caption} ${p + 1}`, { x: x1 + 4, y: y - photoH - 10, size: 7, font: helvetica, color: C.medText });
           }
 
           if (p + 1 < photos.length) {
             try {
-              const imgBytes2 = await loadImageBytes(photos[p + 1]);
-              const img2 = photos[p + 1].startsWith("data:image/png") || photos[p + 1].startsWith("data:image/png;")
-                ? await pdfDoc.embedPng(imgBytes2)
-                : await pdfDoc.embedJpg(imgBytes2);
+              const img2 = await embedImageFromDataUrl(pdfDoc, photos[p + 1]);
+              if (!img2) throw new Error('not a data URL');
               const r2 = img2.width / img2.height;
               let w2 = photoW, h2calc = w2 / r2;
               if (h2calc > photoH) { h2calc = photoH; w2 = h2calc * r2; }
@@ -323,10 +504,9 @@ export async function POST(req: NextRequest) {
             }
             if (drew2) {
               page.drawRectangle({ x: x2, y: y - photoH, width: photoW, height: photoH, borderColor: C.border, borderWidth: 0.5 });
-              page.drawText(`${caption} ${p + 2}`, { x: x2 + 4, y: y - photoH - 10, size: 7, font: helvetica, color: C.medText });
+              drawTextSafely(page, `${caption} ${p + 2}`, { x: x2 + 4, y: y - photoH - 10, size: 7, font: helvetica, color: C.medText });
             }
           }
-          // Avança y pela maior altura real desenhada (ou photoH se nenhuma)
           const rowH = Math.max(drew1 ? h1 : 0, drew2 ? h2 : 0, drew1 || drew2 ? 0 : photoH);
           y -= rowH + photoGap + 8;
         }
@@ -334,12 +514,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Observações Gerais
+    // ===== OBSERVAÇÕES GERAIS - COM ALTURA DINÂMICA =====
     if (generalNotes?.trim()) {
-      if (y < M + 80) { page = pdfDoc.addPage([PAGE_W, PAGE_H]); y = PAGE_H - M; }
+      // Calcula altura necessária
+      const titleHeight = 26; // drawSectionTitle height
+      const contentHeight = measureTextHeight(generalNotes, CONTENT_W, 9, helvetica, 13);
+      const totalNotesHeight = titleHeight + contentHeight + 20; // + espaçamento
+
+      const { page: newPage, y: newY } = ensureSpace(page, y, totalNotesHeight, pdfDoc, helveticaBold);
+      page = newPage; y = newY;
+
       y = drawSectionTitle(page, "Observações Gerais", y, helveticaBold);
-      y = drawWrapped(page, generalNotes, M, y, 9, C.darkText, helvetica, CONTENT_W, 13);
+      y -= 4; // pequeno espaçamento
+      const wrappedResult = drawWrapped(page, generalNotes, M, y, 9, C.darkText, helvetica, CONTENT_W, 13, pdfDoc, helveticaBold);
+      page = wrappedResult.page;
+      y = wrappedResult.y;
     }
+
+    // ===== ASSINATURA - POSICIONADA APÓS OBSERVAÇÕES COM ESPAÇAMENTO =====
+    // Sempre desenha a seção de assinatura (com ou sem imagem digital)
+    // Adiciona espaçamento visual entre observações e assinatura
+    y -= 16; // gap entre seções
+
+    const sigResult = await drawSignatureSection(page, y, signature, pdfDoc, helvetica, helveticaBold, company, customer);
+    page = sigResult.page;
+    y = sigResult.y;
 
     // Footer pages
     const pages = pdfDoc.getPages();
@@ -347,14 +546,14 @@ export async function POST(req: NextRequest) {
       const pg = pages[pi];
       const footerY = 24;
       pg.drawLine({ start: { x: M, y: footerY + 12 }, end: { x: PAGE_W - M, y: footerY + 12 }, thickness: 0.5, color: C.teal });
-      pg.drawText(joinParts([company.legalName, company.phone, company.email]), { x: M, y: footerY, size: 7, font: helvetica, color: C.lightText });
+      drawTextSafely(pg, joinParts([company.legalName, company.phone, company.email]), { x: M, y: footerY, size: 7, font: helvetica, color: C.lightText });
       const pageLabel = `Página ${pi + 1} de ${pages.length}`;
-      pg.drawText(pageLabel, {
+      drawTextSafely(pg, pageLabel, {
         x: PAGE_W - M - helveticaBold.widthOfTextAtSize(pageLabel, 8),
         y: footerY, size: 8, font: helveticaBold, color: C.teal,
       });
       const brandLabel = "INTECH ELEVADORES";
-      pg.drawText(brandLabel, {
+      drawTextSafely(pg, brandLabel, {
         x: PAGE_W / 2 - helveticaBold.widthOfTextAtSize(brandLabel, 6) / 2,
         y: footerY - 12, size: 6, font: helveticaBold, color: C.teal,
       });
