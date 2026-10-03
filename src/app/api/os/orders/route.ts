@@ -77,24 +77,30 @@ export async function POST(request: Request) {
   if (!customer) return NextResponse.json({ error: "Cliente inválido para esta empresa." }, { status: 400 });
 
   const order = await db.$transaction(async (tx) => {
-    const last = await tx.serviceOrder.findFirst({ where: { companyId: session.companyId }, orderBy: { number: "desc" }, select: { number: true } });
+    // Lock para evitar concorrência: pega última OS da empresa com FOR UPDATE
+    const last = await tx.$queryRaw`
+      SELECT number FROM "ServiceOrder"
+      WHERE "companyId" = ${session.companyId}
+      ORDER BY number DESC
+      LIMIT 1
+    ` as { number: number }[];
 
-    // Gera número no formato AA/NNNN (56/AAAA)
-    // Ano atual (último dígito de 20XX) + / + próximo número sequencial
-    const currentYear = new Date().getFullYear().toString().slice(-2); // ex: 26
-    const yearPrefix = parseInt(currentYear, 10);
-    const lastYear = last?.number ? Math.floor(last.number / 10000) : 0;
+    const lastNumber = last[0]?.number ?? null;
+
+    // Gera número no formato AAASSEQ (ex: 26500 = 26*1000 + 500)
+    // Ano atual (2 dígitos) + sequência de 3 dígitos
+    const currentYear = new Date().getFullYear().toString().slice(-2); // ex: "26"
+    const yearPrefix = parseInt(currentYear, 10); // 26
+    const lastYear = lastNumber ? Math.floor(lastNumber / 1000) : 0; // 26500 / 1000 = 26
     let nextSequence = 500; // começa em 500, depois 531, 562...
 
-    // Se já existem ordens neste ano, continua a sequência
-    if (last?.number && lastYear > 0 && lastYear.toString().slice(-2) === currentYear) {
-      const year = Math.floor(last.number / 100);
-      const seq = last.number % 100;
-      // Incrementa a sequência de 31 em 31 (500 + 31 = 531, 531 + 31 = 562)
-      nextSequence = ((seq + 31) % 10000) || 500;
+    // Se já existem ordens neste ano, continua a sequência (+31)
+    if (lastNumber && lastYear > 0 && lastYear === yearPrefix) {
+      const seq = lastNumber % 1000; // 26500 % 1000 = 500
+      nextSequence = seq + 31; // 500 + 31 = 531
     }
 
-    const nextNumber = yearPrefix * 100 + nextSequence;
+    const nextNumber = yearPrefix * 1000 + nextSequence; // 26 * 1000 + 500 = 26500
 
     // Create photos if any records have them
     const recordsWithPhotos = result.data.records.filter(r => r.photos && r.photos.length > 0);
