@@ -32,7 +32,7 @@ export default async function OsLayout({ children }: { children: React.ReactNode
               <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
                 <Building className="h-5 w-5 text-white" />
               </div>
-              <span className="font-bold text-navy-900 text-lg hidden sm:block">SaaS OS Elevadores</span>
+              <span className="font-bold text-navy-900 text-lg hidden sm:block">Smart Intech</span>
             </Link>
             <nav className="flex items-center gap-4">
               <Link href="/os" className="text-sm font-medium text-navy-700 hover:text-navy-900 transition-colors">Dashboard</Link>
@@ -51,7 +51,7 @@ export default async function OsLayout({ children }: { children: React.ReactNode
         {children}
       </main>
       <footer className="border-t border-steel-200 bg-white px-4 py-4 text-center text-xs text-steel-400">
-        <p>SaaS OS Elevadores — Sistema de Ordem de Serviço para Manutenção de Elevadores</p>
+        <p>Smart Intech — Sistema de Ordem de Serviço para Manutenção de Elevadores</p>
       </footer>
     </div>
   );

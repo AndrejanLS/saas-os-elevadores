@@ -15,21 +15,21 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "SaaS OS Elevadores — Ordem de Serviço para Manutenção de Elevadores",
+  title: "Smart Intech — Ordem de Serviço para Manutenção de Elevadores",
   description: "Sistema profissional para empresas de manutenção de elevadores. Gestão de clientes, elevadores, ordens de serviço e geração de PDF.",
   keywords: ["elevadores", "manutenção de elevadores", "ordem de serviço", "OS elevadores", "gestão de manutenção"],
-  authors: [{ name: "SaaS OS Elevadores" }],
+  authors: [{ name: "Smart Intech" }],
   openGraph: {
     type: "website",
     locale: "pt_BR",
     url: "http://localhost:3000",
-    title: "SaaS OS Elevadores — Ordem de Serviço para Manutenção de Elevadores",
+    title: "Smart Intech — Ordem de Serviço para Manutenção de Elevadores",
     description: "Sistema profissional para empresas de manutenção de elevadores.",
-    siteName: "SaaS OS Elevadores",
+    siteName: "Smart Intech",
   },
   twitter: {
     card: "summary_large_image",
-    title: "SaaS OS Elevadores",
+    title: "Smart Intech",
     description: "Sistema profissional para empresas de manutenção de elevadores.",
   },
   robots: { index: true, follow: true },

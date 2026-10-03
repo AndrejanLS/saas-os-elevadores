@@ -1,0 +1,394 @@
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+type AnyRecord = Record<string, any>;
+
+export const situationLabel: Record<string, string> = {
+  NORMAL: "Em Conformidade",
+  WITH_NOTES: "Com apontamentos",
+  QUOTE_REQUIRED: "Necessário orçamento",
+  IRREGULARITY: "Equipamento com irregularidade",
+};
+
+function joinParts(parts: Array<string | null | undefined>): string {
+  return parts.filter((p) => p && String(p).trim()).join(", ");
+}
+
+function formatDate(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-BR");
+}
+
+function formatTime(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Página A4 em pontos (pdf-lib usa pontos, origem bottom-left)
+const PAGE_W = 595.28;  // 210mm
+const PAGE_H = 841.89;  // 297mm
+const M = 45.36;        // 16mm margin
+
+// Cores exatas do PDF referência
+const C = {
+  navy: rgb(14/255, 30/255, 54/255),       // #0E1E36
+  deepNavy: rgb(8/255, 18/255, 32/255),    // #081220
+  teal: rgb(0, 136/255, 146/255),          // #008892
+  tealLight: rgb(12/255, 168/255, 178/255), // #0CA8B2
+  white: rgb(1, 1, 1),
+  darkText: rgb(15/255, 23/255, 42/255),   // #0F172A
+  medText: rgb(71/255, 85/255, 105/255),   // #475569
+  lightText: rgb(148/255, 163/255, 184/255), // #94A3B8
+  border: rgb(203/255, 213/255, 225/255),  // #CBD5E1
+  lightBg: rgb(245/255, 248/255, 252/255), // #F5F8FC
+};
+
+function drawText(page: any, text: string, x: number, y: number, size: number, color: any, font: any, align: "left" | "center" | "right" = "left", maxW?: number): number {
+  if (!text) return y;
+  // WinAnsi sanitize: strip combining marks and non-encodable chars
+  const safe = text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\x20-\x7EÀ-ÿ]/g, "");
+  const lines = maxW ? wrapText(safe, font, size, maxW) : [safe];
+  let curY = y;
+  for (const line of lines) {
+    const w = font.widthOfTextAtSize(line, size);
+    let drawX = x;
+    if (align === "center") drawX = x - w / 2;
+    else if (align === "right") drawX = x - w;
+    try {
+      page.drawText(line, { x: drawX, y: curY, size, font, color });
+    } catch {
+      page.drawText("[texto]", { x: drawX, y: curY, size, font, color });
+    }
+    curY -= size * 1.25;
+  }
+  return curY;
+}
+
+function wrapText(text: string, font: any, size: number, maxWidth: number): string[] {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const test = current ? current + " " + word : word;
+    if (font.widthOfTextAtSize(test, size) <= maxWidth) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [text];
+}
+
+function drawWrapped(page: any, text: string, x: number, y: number, size: number, color: any, font: any, maxW: number, lineH: number): number {
+  if (!text) return y;
+  const safe = text.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7EÀ-ÿ]/g, "");
+  const lines = wrapText(safe, font, size, maxW);
+  let curY = y;
+  for (const line of lines) {
+    try {
+      page.drawText(line, { x, y: curY, size, font, color });
+    } catch {
+      page.drawText("[texto]", { x, y: curY, size, font, color });
+    }
+    curY -= lineH;
+  }
+  return curY;
+}
+
+// Desenha coluna de campos (label + value)
+function drawFieldCol(page: any, fields: Array<[string, string]>, x: number, y: number, maxW: number, font: any, fontBold: any): number {
+  let curY = y;
+  for (const [label, value] of fields) {
+    // Label
+    curY = drawText(page, label, x, curY, 7, C.lightText, font, "left", maxW);
+    // Value
+    curY = drawText(page, value || "—", x, curY, 9, C.darkText, fontBold, "left", maxW);
+    curY -= 4; // gap entre campos
+  }
+  return curY;
+}
+
+export async function generateOrderPdf(params: {
+  order?: AnyRecord | null;
+  company?: AnyRecord | null;
+  customer?: AnyRecord | null;
+  elevatorLabel?: string;
+  records?: AnyRecord[];
+  situation?: string;
+  startTime?: string | Date | null;
+  endTime?: string | Date | null;
+  responsibleName?: string;
+  responsibleRole?: string;
+  technicianName?: string;
+  generalNotes?: string;
+}) {
+  const { order } = params;
+  const company: AnyRecord = order?.company || params.company || {};
+  const customer: AnyRecord = order?.customer || params.customer || {};
+
+  const elevatorLabel: string =
+    order && typeof order.elevator === "string"
+      ? order.elevator
+      : order?.elevator?.identification || params.elevatorLabel || "—";
+
+  const records: AnyRecord[] = order?.records || params.records || [];
+  const situation = order?.situation ?? params.situation ?? "NORMAL";
+  const startTime = order?.startTime ?? params.startTime ?? null;
+  const endTime = order?.endTime ?? params.endTime ?? null;
+  const responsibleName = order?.responsibleName || params.responsibleName || "";
+  const responsibleRole = order?.responsibleRole || params.responsibleRole || "";
+  const technicianName = order?.technician?.name || order?.technicianName || params.technicianName || "";
+  const generalNotes = order?.generalNotes || params.generalNotes || "";
+
+  const number: number = order?.number ?? 0;
+  const isDraft = !order;
+  const openedAtRaw = order?.openedAt ?? new Date();
+  const openedAt = openedAtRaw instanceof Date ? openedAtRaw : new Date(openedAtRaw);
+  const ref = isDraft ? "OS Nº — (rascunho)" : `Ref: OS-${String(openedAt.getFullYear()).slice(-2)}/${String(number).padStart(4, "0")}`;
+  const statusText = situationLabel[situation] || "PREVENTIVA";
+
+  const pdfDoc = await PDFDocument.create();
+  let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  // ============================================================
+  // PÁGINA 1 - LAYOUT EXATO DO PDF REFERÊNCIA
+  // ============================================================
+
+  // Header background: retângulo deep navy topo (0-100pt)
+  page.drawRectangle({ x: 0, y: PAGE_H - 100, width: PAGE_W, height: 100, color: C.deepNavy });
+
+  // Linha decorativa ciano/branco/ciano na base do header
+  const decoY = PAGE_H - 100;
+  const segW = (PAGE_W - 2 * M) / 3;
+  page.drawLine({ start: { x: M, y: decoY }, end: { x: M + segW, y: decoY }, thickness: 1, color: C.teal });
+  page.drawLine({ start: { x: M + segW, y: decoY }, end: { x: M + segW * 2, y: decoY }, thickness: 1.5, color: C.white });
+  page.drawLine({ start: { x: M + segW * 2, y: decoY }, end: { x: PAGE_W - M, y: decoY }, thickness: 1, color: C.teal });
+
+  // INTECH ELEVADORES (esquerda, dentro do header)
+  drawText(page, "INTECH", M, PAGE_H - 45, 22, C.teal, helveticaBold);
+  drawText(page, "ELEVADORES", M, PAGE_H - 65, 11, C.tealLight, helvetica);
+
+  // ORDEM DE SERVIÇO (direita, header)
+  drawText(page, "ORDEM DE SERVIÇO", PAGE_W - M, PAGE_H - 40, 14, C.white, helveticaBold, "right");
+
+  // Ref
+  drawText(page, ref, PAGE_W - M, PAGE_H - 55, 9, C.tealLight, helvetica, "right");
+
+  // Status badge
+  const statusW = helveticaBold.widthOfTextAtSize(statusText, 8) + 16;
+  const statusX = PAGE_W - M - statusW;
+  page.drawRectangle({ x: statusX, y: PAGE_H - 78, width: statusW, height: 14, color: C.navy, borderColor: C.teal, borderWidth: 1 });
+  drawText(page, statusText, PAGE_W - M - 8, PAGE_H - 74, 8, C.white, helveticaBold, "right");
+
+  // ===== EMPRESA CONTRATADA | CLIENTE / CONDOMÍNIO =====
+  let y = PAGE_H - 130;
+
+  // Títulos das colunas
+  drawText(page, "EMPRESA CONTRATADA", M, y, 9, C.navy, helveticaBold);
+  drawText(page, "CLIENTE / CONDOMÍNIO", PAGE_W / 2 + 10, y, 9, C.navy, helveticaBold);
+  y -= 8;
+
+  // Linhas separadoras
+  page.drawLine({ start: { x: M, y }, end: { x: PAGE_W / 2 - 5, y }, thickness: 0.5, color: C.teal });
+  page.drawLine({ start: { x: PAGE_W / 2 + 10, y }, end: { x: PAGE_W - M, y }, thickness: 0.5, color: C.teal });
+  y -= 14;
+
+  const leftFields: Array<[string, string]> = [
+    ["Razão Social:", company.legalName || "—"],
+    ["CNPJ:", company.taxId || "—"],
+    ["Endereço:", joinParts([company.address, company.number, company.neighborhood, company.city, company.state]) || "—"],
+    ["Telefone:", company.phone || "—"],
+    ["E-mail:", company.email || "—"],
+    ["Website:", company.website || "—"],
+  ];
+
+  // Coluna direita - CLIENTE
+  const rightFields: Array<[string, string]> = [
+    ["Condomínio:", customer.name || "—"],
+    ["CNPJ/CPF:", customer.taxId || "—"],
+    ["Endereço:", joinParts([customer.address, customer.number, customer.neighborhood, customer.city, customer.state]) || "—"],
+    ["Responsável:", customer.contactName || "—"],
+    ["Telefone:", customer.phone || "—"],
+    ["E-mail:", customer.email || "—"],
+  ];
+
+  const colW = PAGE_W / 2 - M - 15;
+  let yLeft = drawFieldCol(page, leftFields, M, y, colW, helvetica, helveticaBold);
+  let yRight = drawFieldCol(page, rightFields, PAGE_W / 2 + 10, y, colW, helvetica, helveticaBold);
+  y = Math.min(yLeft, yRight) - 10;
+
+  // ===== DADOS DO ATENDIMENTO TÉCNICO =====
+  drawText(page, "DADOS DO ATENDIMENTO TÉCNICO", M, y, 10, C.navy, helveticaBold);
+  y -= 8;
+  page.drawLine({ start: { x: M, y }, end: { x: PAGE_W - M, y }, thickness: 0.5, color: C.teal });
+  y -= 14;
+
+  // Tabela
+  const headers = ["EQUIPAMENTO", "DATA DE EMISSÃO", "INÍCIO DO TÉCNICO", "TÉRMINO", "STATUS DA MANUTENÇÃO"];
+  const dataRow = [
+    elevatorLabel,
+    formatDate(openedAt),
+    formatTime(startTime),
+    formatTime(endTime),
+    statusText.toUpperCase(),
+  ];
+  const colWidths = [125, 95, 95, 95, 125];
+  const tableHeaderY = y;
+  const tableRowH = 22;
+
+  // Header fundo navy
+  page.drawRectangle({ x: M, y: y - tableRowH, width: 530, height: tableRowH, color: C.navy });
+  let cx = M;
+  for (let i = 0; i < headers.length; i++) {
+    drawText(page, headers[i], cx + 4, y - 4, 7, C.white, helveticaBold, "left", colWidths[i] - 8);
+    cx += colWidths[i];
+  }
+
+  // Linha dados
+  y -= tableRowH;
+  page.drawRectangle({ x: M, y: y - tableRowH + 2, width: 530, height: tableRowH - 2, color: C.lightBg });
+  cx = M;
+  for (let i = 0; i < dataRow.length; i++) {
+    const color = i === 4 ? C.teal : C.darkText;
+    const font = i === 4 ? helveticaBold : helvetica;
+    drawText(page, dataRow[i] || "—", cx + 4, y - 4, 9, color, font, "left", colWidths[i] - 8);
+    cx += colWidths[i];
+  }
+
+  // Borda tabela
+  page.drawRectangle({ x: M, y: y - tableRowH, width: 530, height: tableRowH * 2, borderColor: C.teal, borderWidth: 1 });
+  y -= tableRowH * 2 + 10;
+
+  // ===== ITENS DE VERIFICAÇÃO & MANUTENÇÃO =====
+  drawText(page, `ITENS DE VERIFICAÇÃO & MANUTENÇÃO (${records.length})`, M, y, 10, C.navy, helveticaBold);
+  drawText(page, "OK / APROVADO", PAGE_W - M, y, 9, C.teal, helveticaBold, "right");
+  y -= 20;
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const partTitle = `REGISTRO ${i + 1}. ${(record.customPart || record.part || "GERAL").toUpperCase()}`;
+    y = drawText(page, partTitle, M, y, 9, C.navy, helveticaBold);
+    y -= 4;
+    if (record.notes) {
+      y = drawWrapped(page, record.notes, M, y, 8.5, C.medText, helvetica, 510, 13);
+    }
+    y -= 10;
+  }
+
+  // ===== ASSINATURAS =====
+  const sigY = 130;
+  const sigLineW = 230;
+  page.drawLine({ start: { x: M, y: sigY }, end: { x: M + sigLineW, y: sigY }, thickness: 0.5, color: C.teal });
+  page.drawLine({ start: { x: PAGE_W / 2 + 10, y: sigY }, end: { x: PAGE_W / 2 + 10 + sigLineW, y: sigY }, thickness: 0.5, color: C.teal });
+
+  drawText(page, "TÉCNICO RESPONSÁVEL - INTECH ELEVADORES", M, sigY - 10, 8, C.navy, helveticaBold);
+  drawText(page, "SÍNDICO / RESPONSÁVEL PELO CONDOMÍNIO", PAGE_W / 2 + 10, sigY - 10, 8, C.navy, helveticaBold);
+
+  drawText(page, technicianName || "___________________________________", M, sigY - 22, 8, C.darkText, helvetica);
+  drawText(page, responsibleName || customer.contactName || "___________________________________", PAGE_W / 2 + 10, sigY - 22, 8, C.darkText, helvetica);
+
+  // ===== RODAPÉ =====
+  const footerY = 40;
+  page.drawLine({ start: { x: M, y: footerY }, end: { x: PAGE_W - M, y: footerY }, thickness: 0.3, color: C.teal });
+  drawText(page, joinParts([company.legalName, company.phone, company.email]), M, footerY - 10, 7, C.lightText, helvetica);
+  drawText(page, "Página 1 de 2", PAGE_W - M, footerY - 10, 8, C.teal, helveticaBold, "right");
+  drawText(page, "INTECH ELEVADORES", PAGE_W / 2, footerY - 20, 6, C.teal, helveticaBold, "center");
+
+  // ============================================================
+  // PÁGINA 2 - RELATÓRIO FOTOGRÁFICO
+  // ============================================================
+  if (records.some((r) => Array.isArray(r.photos) && r.photos.length > 0)) {
+    page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+
+    // Header pág 2
+    page.drawRectangle({ x: 0, y: PAGE_H - 80, width: PAGE_W, height: 80, color: C.deepNavy });
+    page.drawLine({ start: { x: M, y: PAGE_H - 80 }, end: { x: PAGE_W - M, y: PAGE_H - 80 }, thickness: 1, color: C.teal });
+    page.drawLine({ start: { x: M, y: PAGE_H - 80 }, end: { x: M + segW, y: PAGE_H - 80 }, thickness: 1, color: C.teal });
+    page.drawLine({ start: { x: M + segW, y: PAGE_H - 80 }, end: { x: M + segW * 2, y: PAGE_H - 80 }, thickness: 1.5, color: C.white });
+    page.drawLine({ start: { x: M + segW * 2, y: PAGE_H - 80 }, end: { x: PAGE_W - M, y: PAGE_H - 80 }, thickness: 1, color: C.teal });
+
+    drawText(page, "INTECH", M, PAGE_H - 40, 22, C.teal, helveticaBold);
+    drawText(page, "ELEVADORES", M, PAGE_H - 58, 11, C.tealLight, helvetica);
+    drawText(page, "RELATÓRIO FOTOGRÁFICO DE CAMPO", PAGE_W / 2, PAGE_H - 40, 13, C.white, helveticaBold, "center");
+    drawText(page, `Anexo técnico da ${ref.replace("Ref: ", "")}`, PAGE_W - M, PAGE_H - 55, 8, C.tealLight, helvetica, "right");
+
+    let y2 = PAGE_H - 110;
+    drawText(page, "EVIDÊNCIAS FOTOGRÁFICAS DA INSPEÇÃO", M, y2, 9, C.navy, helveticaBold);
+    y2 -= 20;
+
+    const photoW = 255;
+    const photoH = 180;
+    const photoGap = 20;
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      const caption = record.customPart || record.part || `Registro ${i + 1}`;
+      const photos: string[] = (record.photos || [])
+        .map((p: any) => (typeof p === "string" ? p : p?.objectKey))
+        .filter((p: any) => typeof p === "string" && p.startsWith("data:image/"));
+
+      for (let p = 0; p < photos.length; p += 2) {
+        const x1 = M;
+        const x2 = M + photoW + photoGap;
+
+        // Placeholder foto 1
+        page.drawRectangle({ x: x1, y: y2 - photoH, width: photoW, height: photoH, borderColor: C.border, borderWidth: 0.5 });
+        drawText(page, `Registro ${i + 1}.${p + 1} - ${caption}`, x1, y2 - photoH - 8, 7, C.medText, helvetica);
+
+        if (p + 1 < photos.length) {
+          page.drawRectangle({ x: x2, y: y2 - photoH, width: photoW, height: photoH, borderColor: C.border, borderWidth: 0.5 });
+          drawText(page, `Registro ${i + 1}.${p + 2} - ${caption}`, x2, y2 - photoH - 8, 7, C.medText, helvetica);
+        }
+        y2 -= photoH + photoGap + 20;
+      }
+    }
+
+    // Observações
+    if (generalNotes && generalNotes.trim()) {
+      y2 = Math.max(y2 - 20, 100);
+      drawText(page, "OBSERVAÇÕES GERAIS E PARECER TÉCNICO", M, y2, 10, C.navy, helveticaBold);
+      y2 -= 8;
+      page.drawLine({ start: { x: M, y: y2 }, end: { x: PAGE_W - M, y: y2 }, thickness: 0.5, color: C.teal });
+      y2 -= 14;
+      drawWrapped(page, generalNotes, M, y2, 9, C.darkText, helvetica, 510, 14);
+    }
+
+    // Rodapé pág 2
+    page.drawLine({ start: { x: M, y: footerY }, end: { x: PAGE_W - M, y: footerY }, thickness: 0.3, color: C.teal });
+    drawText(page, joinParts([company.legalName, company.phone, company.email]), M, footerY - 10, 7, C.lightText, helvetica);
+    drawText(page, "Página 2 de 2", PAGE_W - M, footerY - 10, 8, C.teal, helveticaBold, "right");
+    drawText(page, "INTECH ELEVADORES", PAGE_W / 2, footerY - 20, 6, C.teal, helveticaBold, "center");
+  }
+
+  const pdfBytes = await pdfDoc.save();
+
+  // Auto-download no navegador
+  if (typeof window !== "undefined") {
+    const blob = new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const number = order?.number ?? 0;
+    const customerName = customer?.name || "ordem-de-servico";
+    const safeName = customerName.slice(0, 30).replace(/[^\w]+/g, "-").toLowerCase();
+    const fileName = number > 0
+      ? `os-${String(number).padStart(6, "0")}-${safeName}.pdf`
+      : `os-rascunho-${safeName}.pdf`;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  return pdfBytes;
+}

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Building2, Save, Loader2 } from "lucide-react";
+import { Building2, Save, Loader2, RefreshCw } from "lucide-react";
 
 interface CustomerFormData {
   name: string;
@@ -50,6 +50,8 @@ interface CustomerModalProps {
 
 export function CustomerModal({ open, onOpenChange, customer, onSave, saving }: CustomerModalProps) {
   const [formData, setFormData] = useState<CustomerFormData>(EMPTY_FORM);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   useEffect(() => {
     setFormData({
@@ -69,9 +71,86 @@ export function CustomerModal({ open, onOpenChange, customer, onSave, saving }: 
     });
   }, [customer]);
 
+  const handleTaxIdChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/\D/g, ""); // apenas dígitos
+    if (value.length >= 11 && value.length <= 14) {
+      // CPF (11) ou CNPJ (14) - tenta lookup
+      if (value.length === 14) {
+        setLookupLoading(true);
+        setLookupError(null);
+        try {
+          const res = await fetch(`/api/os/cnpj/${value}`);
+          const data = await res.json();
+          if (res.ok) {
+            setFormData((prev) => ({
+              ...prev,
+              name: data.name || prev.name,
+              taxId: data.taxId,
+              address: data.address || prev.address,
+              number: data.number || prev.number,
+              complement: data.complement || prev.complement,
+              neighborhood: data.neighborhood || prev.neighborhood,
+              city: data.city || prev.city,
+              state: data.state || prev.state,
+              postalCode: data.postalCode || prev.postalCode,
+              phone: data.phone || prev.phone,
+              email: data.email || prev.email,
+            }));
+          } else {
+            setLookupError(data.error || "CNPJ não encontrado");
+          }
+        } catch (err) {
+          setLookupError("Erro ao consultar CNPJ");
+        } finally {
+          setLookupLoading(false);
+        }
+      }
+    }
+    // Sempre atualiza o campo taxId com o valor formatado
+    setFormData((prev) => ({
+      ...prev,
+      taxId: value.length === 11
+        ? value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "\$1.\$2.\$3\-\$4")
+        : value.length === 14
+          ? value.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "\$1.\$2.\$3\/\$4\-\$5")
+          : value
+    }));
+  };
+
+  const handleCepChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/\D/g, "");
+    if (value.length === 8) {
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${value}/json/`);
+        const data = await res.json();
+        if (!data.erro) {
+          setFormData((prev) => ({
+            ...prev,
+            address: data.logradouro || prev.address,
+            neighborhood: data.bairro || prev.neighborhood,
+            city: data.localidade || prev.city,
+            state: data.uf || prev.state,
+            // manter número/complemento que o usuário já digitou
+          }));
+        }
+      } catch {
+        // silent fail - não quebra a experiência
+      }
+    }
+    // Aplica máscara de CEP: 00000-000
+    setFormData((prev) => ({
+      ...prev,
+      postalCode: value.length >= 5
+        ? value.replace(/^(\d{5})(\d{3})/, "\$1-\$2")
+        : value
+    }));
+  };
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    console.log('[CustomerModal] Submitting:', formData);
     await onSave(formData);
+    console.log('[CustomerModal] onSave completed');
   }
 
   return (
@@ -100,13 +179,24 @@ export function CustomerModal({ open, onOpenChange, customer, onSave, saving }: 
 
             <div>
               <Label htmlFor="taxId">CNPJ / CPF</Label>
-              <Input
-                id="taxId"
-                value={formData.taxId}
-                onChange={(e) => setFormData({ ...formData, taxId: e.target.value })}
-                placeholder="00.000.000/0000-00"
-                className="mt-1"
-              />
+              <div className="relative">
+                <Input
+                  id="taxId"
+                  value={formData.taxId}
+                  onChange={handleTaxIdChange}
+                  placeholder="00.000.000/0000-00"
+                  className="mt-1 w-full"
+                  autoComplete="off"
+                />
+                {lookupLoading && (
+                  <RefreshCw className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
+                )}
+                {lookupError && (
+                  <div className="absolute right-0 top-full mt-1 w-full text-sm text-red-600">
+                    {lookupError}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>
@@ -212,7 +302,7 @@ export function CustomerModal({ open, onOpenChange, customer, onSave, saving }: 
                   <Input
                     id="postalCode"
                     value={formData.postalCode}
-                    onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
+                    onChange={handleCepChange}
                     placeholder="00000-000"
                     className="mt-1"
                   />
@@ -242,7 +332,7 @@ export function CustomerModal({ open, onOpenChange, customer, onSave, saving }: 
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={saving}>
+            <Button className="bg-white text-primary border border-primary hover:bg-primary hover:text-white" type="submit" disabled={saving}>
               {saving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />

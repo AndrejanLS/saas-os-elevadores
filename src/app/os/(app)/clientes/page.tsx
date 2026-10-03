@@ -74,6 +74,7 @@ export default function ClientesPage() {
 
   async function handleSave(customerData: any) {
     setSaving(true);
+    console.log('[ClientesPage] handleSave called with:', customerData);
     try {
       const method = editingCustomer ? "PUT" : "POST";
       const url = editingCustomer ? `/api/os/clientes/${editingCustomer.id}` : "/api/os/clientes";
@@ -82,10 +83,15 @@ export default function ClientesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(customerData),
       });
+      console.log('[ClientesPage] Response status:', res.status);
       if (res.ok) {
+        console.log('[ClientesPage] Success, closing modal');
         setModalOpen(false);
         setEditingCustomer(null);
         loadCustomers();
+      } else {
+        const err = await res.json();
+        console.error('[ClientesPage] Error response:', err);
       }
     } finally {
       setSaving(false);
@@ -105,7 +111,7 @@ export default function ClientesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Clientes</h1>
           <p className="text-muted-foreground">Gerencie os clientes da sua empresa</p>
         </div>
-        <Button onClick={() => { setEditingCustomer(null); setModalOpen(true); }}>
+        <Button className="bg-white text-primary border border-primary hover:bg-primary hover:text-white" onClick={() => { setEditingCustomer(null); setModalOpen(true); }}>
           <Plus className="mr-2 h-4 w-4" />
           Novo Cliente
         </Button>

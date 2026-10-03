@@ -92,7 +92,86 @@ export default function NewOrderPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [signaturePad, setSignaturePad] = useState<string | null>(null);
+  const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [showSignaturePad, setShowSignaturePad] = useState(false);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Redesenha a assinatura salva no canvas toda vez que ele monta ou re-renderiza.
+  // O navegador limpa o canvas em re-renders do React, então restauramos a partir
+  // do dataURL salvo em propriedade do próprio canvas (sobrevive a re-renders).
+  useEffect(() => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const imageData = (canvas as any).signatureData as string | undefined;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (!imageData) return;
+    const img = new window.Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+    img.src = imageData;
+  });
+
+  // Desenho da assinatura - conteúdo persistido no próprio canvas
+  const drawSignature = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement> | MouseEvent | TouchEvent) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX: number, clientY: number;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+      if (e.cancelable) e.preventDefault();
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    if (e.type === 'mousedown' || e.type === 'touchstart') {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      (canvas as any).isDrawing = true;
+    } else if ((e.type === 'mousemove' || e.type === 'touchmove') && (canvas as any).isDrawing) {
+      ctx.lineTo(x, y);
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    } else if (e.type === 'mouseup' || e.type === 'touchend') {
+      if (!(canvas as any).isDrawing) return;
+      (canvas as any).isDrawing = false;
+      // Salva o conteúdo NO PRÓPRIO CANVAS - sobrevive a re-renders do React
+      (canvas as any).signatureData = canvas.toDataURL('image/png');
+    }
+  };
+
+  const confirmSignature = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    // Trava a assinatura: salva no state React para o preview fixo
+    setSignaturePad(canvas.toDataURL('image/png'));
+    setShowSignaturePad(false);
+  };
+
+  const clearSignature = () => {
+    setSignaturePad(null);
+    const canvas = signatureCanvasRef.current;
+    if (canvas) {
+      (canvas as any).signatureData = undefined;
+      const ctx = canvas.getContext('2d');
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  };
 
   // Fetch company data for display
   const [companyData, setCompanyData] = useState<any>(null);
@@ -203,6 +282,7 @@ export default function NewOrderPage() {
           responsibleName,
           responsibleRole,
           generalNotes,
+          signature: signaturePad,
           servicesNotes: "",
           findingsNotes: "",
         }),
@@ -262,6 +342,7 @@ export default function NewOrderPage() {
           responsibleRole,
           technicianName: "",
           generalNotes,
+          signature: signaturePad,
           orderNumber: 0,
         }),
       });
@@ -589,12 +670,14 @@ export default function NewOrderPage() {
                         <img
                           src={photo}
                           alt={`Foto ${photoIndex + 1}`}
-                          className="h-20 w-20 object-cover rounded-lg border border-steel-200"
+                          className="h-20 w-20 object-cover rounded-lg border border-steel-200 cursor-pointer"
+                          onClick={() => window.open(photo, '_blank')}
                         />
                         <button
                           type="button"
-                          onClick={() => removePhoto(index, photoIndex)}
+                          onClick={(e) => { e.stopPropagation(); removePhoto(index, photoIndex); }}
                           className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Remover foto"
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -608,7 +691,7 @@ export default function NewOrderPage() {
                       <Camera className="h-6 w-6 text-steel-400" />
                     </button>
                   </div>
-                  <p className="mt-1 text-xs text-steel-500">Toque para abrir câmera ou galeria. Múltiplas fotos permitidas.</p>
+                  <p className="mt-1 text-xs text-steel-500">Toque na foto para ampliar. Toque no ícone 📷 para abrir câmera/galeria.</p>
                 </label>
               </div>
             ))}
@@ -663,6 +746,76 @@ export default function NewOrderPage() {
               onChange={(event) => setGeneralNotes(event.target.value)}
               placeholder="Observações livres sobre o atendimento..."
             />
+          </label>
+
+          <label className="block mt-4">
+            <span className="label-base">Assinatura do responsável</span>
+            <div className="space-y-2">
+              {/* Assinatura confirmada: preview fixo verde */}
+              {signaturePad ? (
+                <div className="space-y-3">
+                  <img
+                    src={signaturePad}
+                    alt="Assinatura confirmada"
+                    className="w-full h-32 border-2 border-emerald-500 bg-emerald-50 rounded-lg object-contain"
+                  />
+                  <button
+                    type="button"
+                    onClick={clearSignature}
+                    className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 transition-colors"
+                  >
+                    <Trash2 className="h-3 w-3 mr-1 inline" />
+                    Remover assinatura
+                  </button>
+                  <p className="mt-1 text-xs text-steel-500">Assinatura salva. Clique em "Remover" para refazer.</p>
+                </div>
+              ) : !showSignaturePad ? (
+                <button
+                  type="button"
+                  onClick={() => setShowSignaturePad(true)}
+                  className="flex items-center justify-center gap-2 h-20 w-full border-2 border-dashed border-steel-300 rounded-lg text-steel-500 hover:border-cyan-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors"
+                >
+                  <FileText className="h-5 w-5" />
+                  <span>Adicionar assinatura</span>
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  {/* Canvas de desenho - persistência via canvas.signatureData + useEffect de restore */}
+                  <canvas
+                    ref={signatureCanvasRef}
+                    className="w-full h-32 border-2 border-steel-300 bg-white rounded-lg touch-none cursor-crosshair"
+                    onMouseDown={drawSignature}
+                    onMouseMove={drawSignature}
+                    onMouseUp={drawSignature}
+                    onMouseLeave={drawSignature}
+                    onTouchStart={drawSignature}
+                    onTouchMove={drawSignature}
+                    onTouchEnd={drawSignature}
+                    width={600}
+                    height={128}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={clearSignature}
+                      className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 transition-colors"
+                    >
+                      <X className="h-3 w-3 mr-1 inline" />
+                      Limpar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmSignature}
+                      className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-navy-800 transition-colors"
+                    >
+                      <Check className="h-3 w-3 mr-1 inline" />
+                      Confirmar
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-steel-500">Desenhe com o dedo (celular) ou mouse. Toque em Confirmar para salvar.</p>
+                </div>
+              )}
+            </div>
           </label>
         </section>
 

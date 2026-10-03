@@ -7,7 +7,7 @@ import { createSessionToken } from "@/lib/os-auth";
 import { SESSION_COOKIE } from "@/lib/os-session";
 
 const loginSchema = z.object({
-  email: z.string().trim().email().max(160),
+  email: z.string().trim().min(1).max(160), // aceita "andrejan" sem @
   password: z.string().min(1).max(200),
 });
 
