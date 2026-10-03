@@ -234,7 +234,8 @@ export async function generateOrderPdf(params: {
   const signature = order?.signature || params.signature || null;
 
   const number: number = order?.number ?? 0;
-  const isDraft = !order;
+  const formattedNumber = order?.formattedNumber || order?.displayNumber || "";
+  const isDraft = !order || number <= 0;
   const openedAtRaw = order?.openedAt ?? new Date();
   const openedAt = openedAtRaw instanceof Date ? openedAtRaw : new Date(openedAtRaw);
   const ref = isDraft
@@ -313,10 +314,11 @@ export async function generateOrderPdf(params: {
   // Título principal
   drawText(page, "ORDEM DE SERVIÇO", PAGE_W / 2, PAGE_H - 40, 20, C.white, helveticaBold, "center");
 
-  // Número da OS e referência
+  // Número da OS e referência - usa formattedNumber se disponível
+  const displayNumber = formattedNumber || (number > 0 ? `OS ${Math.floor(number / 1000).toString().slice(-2)}/${String(number % 1000).padStart(3, "0")}` : " — ");
   drawText(
     page,
-    `Nº ${number > 0 ? String(number).padStart(6, "0") : " — "}`,
+    `Nº ${displayNumber}`,
     PAGE_W / 2,
     PAGE_H - 60,
     16,

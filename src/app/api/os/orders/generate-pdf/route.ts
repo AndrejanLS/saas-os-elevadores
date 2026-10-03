@@ -313,20 +313,23 @@ async function drawSignatureSection(page: any, y: number, signature: string | nu
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // Suporta ambos os formatos: { orderNumber: 26500 } ou { order: { number: 26500, formattedNumber: "26/500", ... } }
+    const order = body.order || {};
+    // orderNumber pode vir em body.orderNumber, body.number, order.number
+    const orderNumber = body.orderNumber ?? body.number ?? order.number ?? 0;
     const {
-      company = {},
-      customer = {},
-      elevatorLabel = "",
-      records = [],
-      situation = "NORMAL",
-      startTime = null,
-      endTime = null,
-      responsibleName = "",
-      responsibleRole = "",
-      technicianName = "",
-      generalNotes = "",
-      signature = null,
-      orderNumber = 0,
+      company = order.company || {},
+      customer = order.customer || {},
+      elevatorLabel = order.elevatorLabel || order.elevator?.identification || "",
+      records = order.records || [],
+      situation = order.situation || "NORMAL",
+      startTime = order.startTime || null,
+      endTime = order.endTime || null,
+      responsibleName = order.responsibleName || "",
+      responsibleRole = order.responsibleRole || "",
+      technicianName = order.technicianName || order.technician?.name || "",
+      generalNotes = order.generalNotes || "",
+      signature = order.signature || null,
     } = body;
 
     const pdfDoc = await PDFDocument.create();
@@ -338,6 +341,39 @@ export async function POST(req: NextRequest) {
     let y = PAGE_H - M;
 
     // Header: logo + title
+    // Carrega logo padrão da Intech (442x118px PNG)
+    let intechLogo: any = null;
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const logoPath = path.join(process.cwd(), 'public', 'uploads', 'intech-logo.png');
+      const logoBuffer = fs.readFileSync(logoPath);
+      intechLogo = await pdfDoc.embedPng(logoBuffer);
+    } catch (error) {
+      console.warn('[PDF] logo não encontrado, usando fallback de texto');
+    }
+
+    // Desenha logo se disponível
+    if (intechLogo) {
+      const logoWidth = 180;
+      const logoHeight = (intechLogo.height / intechLogo.width) * logoWidth;
+      page.drawImage(intechLogo, {
+        x: M, y: y - logoHeight - 8,
+        width: logoWidth, height: logoHeight,
+      });
+      y -= logoHeight + 16; // espaço após logo
+    } else {
+      // Fallback: texto estilizado
+      drawTextSafely(page, "INTECH", {
+        x: M, y: y - 24, size: 24, font: helveticaBold, color: C.navy,
+      });
+      drawTextSafely(page, "ELEVADORES", {
+        x: M, y: y - 40, size: 11, font: helvetica, color: C.teal,
+      });
+      y -= 48;
+    }
+
+    // Se company tem logo próprio, usa ele
     if (company.logoObjectKey?.startsWith("data:image/")) {
       try {
         const img = await embedImageFromDataUrl(pdfDoc, company.logoObjectKey);
@@ -353,17 +389,18 @@ export async function POST(req: NextRequest) {
     }
 
     drawTextSafely(page, "ORDEM DE SERVIÇO", {
-      x: PAGE_W - M - helveticaBold.widthOfTextAtSize("ORDEM DE SERVIÇO", 14), y: y - 4, size: 14, font: helveticaBold, color: C.teal,
+      x: PAGE_W - M - helveticaBold.widthOfTextAtSize("ORDEM DE SERVIÇO", 18), y: y - 4, size: 18, font: helveticaBold, color: C.teal,
     });
-    const numberLabel = orderNumber > 0 ? `OS Nº ${String(orderNumber).padStart(6, "0")}` : "OS Nº — (rascunho)";
+    // Formata número da OS: 26/500 (ano + sequência)
+    // orderNumber = 26500 → year=26, seq=500 → "26/500"
+    // orderNumber = 26531 → year=26, seq=531 → "26/531"
+    const year = orderNumber > 0 ? Math.floor(orderNumber / 1000) : 0; // 26500 / 1000 = 26
+    const seq = orderNumber > 0 ? orderNumber % 1000 : 0; // 26500 % 1000 = 500
+    const numberLabel = orderNumber > 0 ? `OS ${year.toString().slice(-2)}/${String(seq).padStart(3, "0")}` : "OS — (rascunho)";
     drawTextSafely(page, numberLabel, {
-      x: PAGE_W - M - helveticaBold.widthOfTextAtSize(numberLabel, 10), y: y - 22, size: 10, font: helveticaBold, color: C.navy,
+      x: PAGE_W - M - helveticaBold.widthOfTextAtSize(numberLabel, 12), y: y - 26, size: 12, font: helveticaBold, color: C.navy,
     });
-    const dateLabel = `Emitida em ${formatDate(new Date())}`;
-    drawTextSafely(page, dateLabel, {
-      x: PAGE_W - M - helvetica.widthOfTextAtSize(dateLabel, 8), y: y - 36, size: 8, font: helvetica, color: C.medText,
-    });
-    y -= 50;
+    y -= 40;
 
     // Empresa Contratada
     y = drawSectionTitle(page, "Empresa Contratada", y, helveticaBold);
@@ -562,7 +599,7 @@ export async function POST(req: NextRequest) {
     const pdfBytes = await pdfDoc.save();
     const customerName = customer.name || "ordem-de-servico";
     const safeName = customerName.slice(0, 30).replace(/[^\w]+/g, "-").toLowerCase();
-    const fileName = orderNumber > 0 ? `os-${String(orderNumber).padStart(6, "0")}-${safeName}.pdf` : `os-rascunho-${safeName}.pdf`;
+    const fileName = orderNumber > 0 ? `os_${year.toString().slice(-2)}-${String(seq).padStart(3, "0")}-${safeName}.pdf` : `os-rascunho-${safeName}.pdf`;
 
     return new NextResponse(pdfBytes as unknown as BodyInit, {
       headers: {

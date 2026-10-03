@@ -21,5 +21,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   if (!order) return NextResponse.json({ error: "OS não encontrada." }, { status: 404 });
 
-  return NextResponse.json({ order });
+  // Converte number (ex: 26500) para formato de exibição (26/500)
+  const year = Math.floor(order.number / 1000);
+  const seq = order.number % 1000;
+  const formattedNumber = `${year.toString().slice(-2)}/${String(seq).padStart(3, "0")}`;
+
+  return NextResponse.json({
+    order: {
+      ...order,
+      formattedNumber, // "26/500"
+      displayNumber: formattedNumber, // alias
+    }
+  });
 }

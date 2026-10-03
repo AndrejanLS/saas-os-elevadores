@@ -11,11 +11,33 @@ export function PdfButton({ orderId }: { orderId: string }) {
     setLoading(true);
     setError("");
     try {
+      // Usa a API remota que já trata formatação de número corretamente
       const response = await fetch(`/api/os/orders/${orderId}/pdf-data`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Não foi possível carregar a OS.");
-      const { generateOrderPdf } = await import("@/lib/generate-order-pdf");
-      await generateOrderPdf({ order: data.order });
+
+      // Chama a API de geração direta passando os dados completos
+      const pdfResponse = await fetch(`/api/os/orders/generate-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data.order),
+      });
+
+      if (!pdfResponse.ok) {
+        const err = await pdfResponse.json();
+        throw new Error(err.error || "Erro ao gerar PDF");
+      }
+
+      // Faz download do blob
+      const blob = await pdfResponse.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `os-${data.order.formattedNumber?.replace("/", "-") || "rascunho"}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Erro ao gerar PDF.");
     } finally {

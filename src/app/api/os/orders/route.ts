@@ -79,13 +79,30 @@ export async function POST(request: Request) {
   const order = await db.$transaction(async (tx) => {
     const last = await tx.serviceOrder.findFirst({ where: { companyId: session.companyId }, orderBy: { number: "desc" }, select: { number: true } });
 
+    // Gera número no formato AA/NNNN (56/AAAA)
+    // Ano atual (último dígito de 20XX) + / + próximo número sequencial
+    const currentYear = new Date().getFullYear().toString().slice(-2); // ex: 26
+    const yearPrefix = parseInt(currentYear, 10);
+    const lastYear = last?.number ? Math.floor(last.number / 10000) : 0;
+    let nextSequence = 500; // começa em 500, depois 531, 562...
+
+    // Se já existem ordens neste ano, continua a sequência
+    if (last?.number && lastYear > 0 && lastYear.toString().slice(-2) === currentYear) {
+      const year = Math.floor(last.number / 100);
+      const seq = last.number % 100;
+      // Incrementa a sequência de 31 em 31 (500 + 31 = 531, 531 + 31 = 562)
+      nextSequence = ((seq + 31) % 10000) || 500;
+    }
+
+    const nextNumber = yearPrefix * 100 + nextSequence;
+
     // Create photos if any records have them
     const recordsWithPhotos = result.data.records.filter(r => r.photos && r.photos.length > 0);
 
     return tx.serviceOrder.create({
       data: {
         companyId: session.companyId,
-        number: (last?.number ?? 149) + 1,
+        number: nextNumber,
         customerId: customer.id,
         elevatorId: elevatorId,
         technicianId: session.userId,
