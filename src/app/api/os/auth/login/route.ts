@@ -24,8 +24,8 @@ function getCookieOptions(request: Request): { secure: boolean; sameSite: SameSi
   const secure = isProduction;
   let sameSite: SameSiteType = "lax";
   if (isProduction) sameSite = "none";
-  else if (isPrivateNetwork) sameSite = "none";  // Permite cookie em rede local (celular)
-  else if (isLocalhost) sameSite = "lax";        // localhost normal
+  else if (isPrivateNetwork) sameSite = "none";
+  else if (isLocalhost) sameSite = "lax";
 
   return { secure, sameSite };
 }
@@ -41,30 +41,46 @@ export async function POST(request: Request) {
   const input = loginSchema.safeParse(body);
   if (!input.success) return NextResponse.json({ error: "Informe e-mail e senha válidos." }, { status: 400 });
 
-  const user = await db.user.findFirst({
-    where: { email: input.data.email.toLowerCase(), active: true },
-  });
-  if (!user || !(await bcrypt.compare(input.data.password, user.passwordHash))) {
-    return NextResponse.json({ error: "E-mail ou senha incorretos." }, { status: 401 });
+  // Verificação de ambiente - retorna erro claro se configuração faltando
+  if (!process.env.DATABASE_URL) {
+    console.error("[LOGIN] DATABASE_URL não configurada");
+    return NextResponse.json({ error: "Configuração de banco de dados ausente. Configure DATABASE_URL." }, { status: 503 });
+  }
+  if (!process.env.AUTH_SECRET) {
+    console.error("[LOGIN] AUTH_SECRET não configurada");
+    return NextResponse.json({ error: "Configuração de autenticação ausente. Configure AUTH_SECRET." }, { status: 503 });
   }
 
-  const token = await createSessionToken({
-    userId: user.id,
-    companyId: user.companyId,
-    role: user.role,
-    name: user.name,
-  });
+  try {
+    const user = await db.user.findFirst({
+      where: { email: input.data.email.toLowerCase(), active: true },
+    });
+    if (!user || !(await bcrypt.compare(input.data.password, user.passwordHash))) {
+      return NextResponse.json({ error: "E-mail ou senha incorretos." }, { status: 401 });
+    }
 
-  const cookieStore = await cookies();
-  const opts = getCookieOptions(request);
+    const token = await createSessionToken({
+      userId: user.id,
+      companyId: user.companyId,
+      role: user.role,
+      name: user.name,
+    });
 
-  cookieStore.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: opts.secure,
-    sameSite: opts.sameSite,
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+    const cookieStore = await cookies();
+    const opts = getCookieOptions(request);
 
-  return NextResponse.json({ success: true, redirectTo: "/os" });
+    cookieStore.set(SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: opts.secure,
+      sameSite: opts.sameSite,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+    });
+
+    return NextResponse.json({ success: true, redirectTo: "/os" });
+  } catch (error) {
+    console.error("[LOGIN] Erro interno:", error);
+    const message = error instanceof Error ? error.message : "Erro interno do servidor";
+    return NextResponse.json({ error: "Falha na autenticação. Tente novamente." }, { status: 500 });
+  }
 }
