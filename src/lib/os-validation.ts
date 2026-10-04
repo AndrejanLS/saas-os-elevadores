@@ -78,6 +78,8 @@ export const serviceOrderSchema = z.object({
   servicesNotes: optionalText(10000),
   findingsNotes: optionalText(10000),
   records: z.array(recordSchema).min(1).max(100),
+  // Campos opcionais de assinatura (para POST e PUT)
+  signature: z.string().optional().nullable(),
 });
 
 export type CompanyInput = z.infer<typeof companySchema>;

@@ -92,85 +92,247 @@ export default function NewOrderPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
-  const [signaturePad, setSignaturePad] = useState<string | null>(null);
+
+  // ========== ESTADOS DA ASSINATURA (robustos) ==========
+  type SignatureStatus = 'idle' | 'editing' | 'saving' | 'saved' | 'error';
+  const [signatureStatus, setSignatureStatus] = useState<SignatureStatus>('idle');
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  const [signatureError, setSignatureError] = useState<string | null>(null);
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [showSignaturePad, setShowSignaturePad] = useState(false);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Redesenha a assinatura salva no canvas toda vez que ele monta ou re-renderiza.
-  // O navegador limpa o canvas em re-renders do React, então restauramos a partir
-  // do dataURL salvo em propriedade do próprio canvas (sobrevive a re-renders).
+  // Configura canvas com devicePixelRatio para assinatura nítida
   useEffect(() => {
     const canvas = signatureCanvasRef.current;
     if (!canvas) return;
-    const imageData = (canvas as any).signatureData as string | undefined;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.scale(dpr, dpr);
+  }, []);
+
+  // Restaura assinatura salva no canvas (se houver signatureDataUrl no state)
+  useEffect(() => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas || !signatureDataUrl) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    if (!imageData) return;
     const img = new window.Image();
     img.onload = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      (canvas as any).signatureData = signatureDataUrl;
     };
-    img.src = imageData;
-  });
+    img.src = signatureDataUrl;
+  }, [signatureDataUrl]);
 
-  // Desenho da assinatura - conteúdo persistido no próprio canvas
-  const drawSignature = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement> | MouseEvent | TouchEvent) => {
+  // ========== DESENHO DA ASSINATURA ==========
+  // Usa Pointer Events unificados para mouse/touch/stylus
+  // touchAction: none impede scroll da página durante desenho
+  const drawSignature = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = signatureCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    e.preventDefault();
+    e.stopPropagation();
+
     const rect = canvas.getBoundingClientRect();
-    let clientX: number, clientY: number;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-      if (e.cancelable) e.preventDefault();
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (e.pointerType === 'touch') {
+      canvas.setPointerCapture(e.pointerId);
     }
 
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-
-    if (e.type === 'mousedown' || e.type === 'touchstart') {
+    if (e.type === 'pointerdown') {
       ctx.beginPath();
       ctx.moveTo(x, y);
       (canvas as any).isDrawing = true;
-    } else if ((e.type === 'mousemove' || e.type === 'touchmove') && (canvas as any).isDrawing) {
+    } else if (e.type === 'pointermove' && (canvas as any).isDrawing) {
       ctx.lineTo(x, y);
       ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
-    } else if (e.type === 'mouseup' || e.type === 'touchend') {
+    } else if (e.type === 'pointerup' || e.type === 'pointerleave' || e.type === 'pointercancel') {
       if (!(canvas as any).isDrawing) return;
       (canvas as any).isDrawing = false;
-      // Salva o conteúdo NO PRÓPRIO CANVAS - sobrevive a re-renders do React
+      if (e.pointerType === 'touch') {
+        try { canvas.releasePointerCapture(e.pointerId); } catch {}
+      }
       (canvas as any).signatureData = canvas.toDataURL('image/png');
     }
   };
 
-  const confirmSignature = () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    // Trava a assinatura: salva no state React para o preview fixo
-    setSignaturePad(canvas.toDataURL('image/png'));
-    setShowSignaturePad(false);
+  // ========== COMPRESSÃO/REDIMENSIONAMENTO DA ASSINATURA ==========
+  // Reduz o payload mantendo qualidade suficiente para PDF
+  const compressSignature = (dataUrl: string, maxWidth = 600, maxHeight = 200): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+
+        // Calcula escala mantendo proporção
+        if (width > maxWidth) {
+          height = height * (maxWidth / width);
+          width = maxWidth;
+        }
+        if (height > maxHeight) {
+          width = width * (maxHeight / height);
+          height = maxHeight;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          // PNG de alta qualidade (não JPEG - mantém transparência)
+          resolve(canvas.toDataURL('image/png'));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    });
   };
 
-  const clearSignature = () => {
-    setSignaturePad(null);
+  // ========== VALIDAÇÃO DE CANVAS VAZIO ==========
+  const isCanvasEmpty = (canvas: HTMLCanvasElement): boolean => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return true;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return imageData.data.every((v, i) => i % 4 === 3 ? v === 0 : v === 255);
+  };
+
+  // ========== SALVAMENTO NO BACKEND COM RETRY ==========
+  const saveSignatureToBackend = async (dataUrl: string, retryCount = 0): Promise<boolean> => {
+    const maxRetries = 2;
+    const pathParts = window.location.pathname.split('/');
+    const orderId = pathParts[pathParts.length - 1];
+
+    if (!orderId || orderId === 'nova') return true; // Nova OS - será salvo no POST
+
+    try {
+      const resp = await fetch(`/api/os/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signature: dataUrl,
+          responsibleName,
+          responsibleRole,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+        throw new Error(err.error || `Falha ao salvar (${resp.status})`);
+      }
+      return true;
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Erro desconhecido';
+
+      // Retry automático em erros de rede
+      if (retryCount < maxRetries && (errorMsg.includes('fetch') || errorMsg.includes('network') || errorMsg.includes('timeout'))) {
+        await new Promise(r => setTimeout(r, 1000 * (retryCount + 1)));
+        return saveSignatureToBackend(dataUrl, retryCount + 1);
+      }
+      throw e;
+    }
+  };
+
+  // ========== CONFIRMAR ASSINATURA (fluxo completo) ==========
+  const handleConfirmSignature = async () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+
+    // Validação: canvas não pode estar vazio
+    if (isCanvasEmpty(canvas)) {
+      setSignatureError("A assinatura não pode estar vazia. Desenhe antes de confirmar.");
+      return;
+    }
+
+    setSignatureStatus('saving');
+    setSignatureError(null);
+
+    try {
+      const rawDataUrl = canvas.toDataURL('image/png');
+      const compressedDataUrl = await compressSignature(rawDataUrl);
+
+      // Atualiza UI imediatamente (optimistic update)
+      setSignatureDataUrl(compressedDataUrl);
+
+      // Salva no backend
+      const saved = await saveSignatureToBackend(compressedDataUrl);
+
+      if (saved) {
+        setSignatureStatus('saved');
+        // Feedback visual de sucesso
+        setTimeout(() => setSignatureError(null), 3000);
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Erro ao salvar assinatura';
+      console.error('Erro ao salvar assinatura:', e);
+      setSignatureStatus('error');
+      setSignatureError(`${errorMsg}. A assinatura continua no canvas - clique em "Tentar novamente".`);
+      // NÃO limpa o canvas - usuário pode tentar novamente
+    }
+  };
+
+  // ========== TENTAR NOVAMENTE ==========
+  const handleRetrySave = async () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+
+    if (isCanvasEmpty(canvas)) {
+      setSignatureError("A assinatura está vazia. Desenhe antes de tentar salvar.");
+      return;
+    }
+
+    setSignatureStatus('saving');
+    setSignatureError(null);
+
+    try {
+      const rawDataUrl = canvas.toDataURL('image/png');
+      const compressedDataUrl = await compressSignature(rawDataUrl);
+      const saved = await saveSignatureToBackend(compressedDataUrl);
+
+      if (saved) {
+        setSignatureStatus('saved');
+        setSignatureDataUrl(compressedDataUrl);
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Erro ao salvar assinatura';
+      setSignatureStatus('error');
+      setSignatureError(`${errorMsg}. Clique em "Tentar novamente".`);
+    }
+  };
+
+  // ========== LIMPAR ASSINATURA ==========
+  const handleClearSignature = () => {
+    setSignatureDataUrl(null);
+    setSignatureStatus('idle');
+    setSignatureError(null);
     const canvas = signatureCanvasRef.current;
     if (canvas) {
       (canvas as any).signatureData = undefined;
       const ctx = canvas.getContext('2d');
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
     }
+  };
+
+  // ========== REFAZER ASSINATURA (após já ter salvo) ==========
+  const handleRedoSignature = () => {
+    // Só permite refazer se usuário clicar explicitamente
+    setSignatureStatus('editing');
+    setSignatureError(null);
+    // Mantém signatureDataUrl até user confirmar nova
   };
 
   // Fetch company data for display
@@ -263,6 +425,12 @@ export default function NewOrderPage() {
     setError("");
     setSaving(true);
     try {
+      // Se estiver salvando assinatura, espera terminar
+      if (signatureStatus === 'saving') {
+        setError("Aguarde o salvamento da assinatura terminar...");
+        return;
+      }
+
       const response = await fetch("/api/os/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -282,7 +450,8 @@ export default function NewOrderPage() {
           responsibleName,
           responsibleRole,
           generalNotes,
-          signature: signaturePad,
+          // Usa novo estado signatureDataUrl (já comprimido)
+          signature: signatureDataUrl,
           servicesNotes: "",
           findingsNotes: "",
         }),
@@ -342,7 +511,8 @@ export default function NewOrderPage() {
           responsibleRole,
           technicianName: "",
           generalNotes,
-          signature: signaturePad,
+          // Usa novo estado signatureDataUrl
+          signature: signatureDataUrl,
           orderNumber: 0,
         }),
       });
@@ -751,53 +921,116 @@ export default function NewOrderPage() {
           <label className="block mt-4">
             <span className="label-base">Assinatura do responsável</span>
             <div className="space-y-2">
-              {/* Assinatura confirmada: preview fixo verde */}
-              {signaturePad ? (
+              {/* ESTADO: SALVA - mostra assinatura + botão refazer */}
+              {signatureDataUrl && signatureStatus === 'saved' && (
                 <div className="space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <span className="text-xs font-semibold uppercase text-steel-400">Responsável</span>
+                      <p className="mt-1 text-navy-900 font-medium">{responsibleName || "Não informado"}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold uppercase text-steel-400">Cargo</span>
+                      <p className="mt-1 text-navy-900">{responsibleRole || "Não informado"}</p>
+                    </div>
+                  </div>
                   <img
-                    src={signaturePad}
-                    alt="Assinatura confirmada"
+                    src={signatureDataUrl}
+                    alt="Assinatura do responsável"
                     className="w-full h-32 border-2 border-emerald-500 bg-emerald-50 rounded-lg object-contain"
-                  />
-                  <button
-                    type="button"
-                    onClick={clearSignature}
-                    className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 transition-colors"
-                  >
-                    <Trash2 className="h-3 w-3 mr-1 inline" />
-                    Remover assinatura
-                  </button>
-                  <p className="mt-1 text-xs text-steel-500">Assinatura salva. Clique em "Remover" para refazer.</p>
-                </div>
-              ) : !showSignaturePad ? (
-                <button
-                  type="button"
-                  onClick={() => setShowSignaturePad(true)}
-                  className="flex items-center justify-center gap-2 h-20 w-full border-2 border-dashed border-steel-300 rounded-lg text-steel-500 hover:border-cyan-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors"
-                >
-                  <FileText className="h-5 w-5" />
-                  <span>Adicionar assinatura</span>
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  {/* Canvas de desenho - persistência via canvas.signatureData + useEffect de restore */}
-                  <canvas
-                    ref={signatureCanvasRef}
-                    className="w-full h-32 border-2 border-steel-300 bg-white rounded-lg touch-none cursor-crosshair"
-                    onMouseDown={drawSignature}
-                    onMouseMove={drawSignature}
-                    onMouseUp={drawSignature}
-                    onMouseLeave={drawSignature}
-                    onTouchStart={drawSignature}
-                    onTouchMove={drawSignature}
-                    onTouchEnd={drawSignature}
-                    width={600}
-                    height={128}
                   />
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={clearSignature}
+                      onClick={handleRedoSignature}
+                      className="flex-1 rounded-lg border border-cyan-300 bg-cyan-50 px-4 py-2 text-sm font-semibold text-cyan-700 hover:bg-cyan-100 transition-colors"
+                    >
+                      <FileText className="h-3 w-3 mr-1 inline" />
+                      Refazer assinatura
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearSignature}
+                      className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 className="h-3 w-3 mr-1 inline" />
+                      Remover assinatura
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-emerald-600">Assinatura salva e sincronizada com o servidor.</p>
+                </div>
+              )}
+
+              {/* ESTADO: ERRO - mantém canvas + botão tentar novamente */}
+              {signatureDataUrl && signatureStatus === 'error' && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-lg border border-amber-300 bg-amber-50">
+                    <p className="text-sm font-semibold text-amber-800 flex items-center gap-1">
+                      <AlertCircle className="h-4 w-4" />
+                      {signatureError}
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <canvas
+                      ref={signatureCanvasRef}
+                      className="w-full h-32 border-2 border-amber-300 bg-white rounded-lg touch-none cursor-crosshair"
+                      onPointerDown={drawSignature}
+                      onPointerMove={drawSignature}
+                      onPointerUp={drawSignature}
+                      onPointerLeave={drawSignature}
+                      onPointerCancel={drawSignature}
+                      style={{ touchAction: 'none' }}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleClearSignature}
+                        className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 transition-colors"
+                      >
+                        <X className="h-3 w-3 mr-1 inline" />
+                        Limpar tudo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRetrySave}
+                        className="flex-1 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 transition-colors"
+                      >
+                        <Loader2 className="h-3 w-3 mr-1 inline animate-spin" />
+                        Tentar novamente
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ESTADO: SALVANDO - loading */}
+              {signatureDataUrl && signatureStatus === 'saving' && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-cyan-600">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="font-semibold">Salvando assinatura no servidor...</span>
+                  </div>
+                  <div className="h-32 border-2 border-cyan-300 bg-cyan-50 rounded-lg" />
+                </div>
+              )}
+
+              {/* ESTADO: EDITANDO (canvas aberto) */}
+              {signatureStatus === 'editing' && (
+                <div className="space-y-3">
+                  <canvas
+                    ref={signatureCanvasRef}
+                    className="w-full h-32 border-2 border-steel-300 bg-white rounded-lg touch-none cursor-crosshair"
+                    onPointerDown={drawSignature}
+                    onPointerMove={drawSignature}
+                    onPointerUp={drawSignature}
+                    onPointerLeave={drawSignature}
+                    onPointerCancel={drawSignature}
+                    style={{ touchAction: 'none' }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleClearSignature}
                       className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 transition-colors"
                     >
                       <X className="h-3 w-3 mr-1 inline" />
@@ -805,7 +1038,7 @@ export default function NewOrderPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={confirmSignature}
+                      onClick={handleConfirmSignature}
                       className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-navy-800 transition-colors"
                     >
                       <Check className="h-3 w-3 mr-1 inline" />
@@ -814,6 +1047,18 @@ export default function NewOrderPage() {
                   </div>
                   <p className="mt-1 text-xs text-steel-500">Desenhe com o dedo (celular) ou mouse. Toque em Confirmar para salvar.</p>
                 </div>
+              )}
+
+              {/* ESTADO: IDLE (nada ainda) - botão para começar */}
+              {signatureStatus === 'idle' && !signatureDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => setSignatureStatus('editing')}
+                  className="flex items-center justify-center gap-2 h-20 w-full border-2 border-dashed border-steel-300 rounded-lg text-steel-500 hover:border-cyan-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors"
+                >
+                  <FileText className="h-5 w-5" />
+                  <span>Adicionar assinatura</span>
+                </button>
               )}
             </div>
           </label>

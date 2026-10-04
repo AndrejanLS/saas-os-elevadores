@@ -244,7 +244,7 @@ function ensureSpace(page: any, y: number, neededHeight: number, pdfDoc: any, fo
 }
 
 // Desenha a área de assinatura completa (com ou sem imagem)
-async function drawSignatureSection(page: any, y: number, signature: string | null, pdfDoc: any, helvetica: any, helveticaBold: any, company: AnyRecord, customer: AnyRecord): Promise<{ page: any; y: number }> {
+async function drawSignatureSection(page: any, y: number, signature: string | null, pdfDoc: any, helvetica: any, helveticaBold: any, company: AnyRecord, customer: AnyRecord, signerName: string, signerRole: string): Promise<{ page: any; y: number }> {
   const minSignatureHeight = 120; // altura mínima reservada para assinatura
   const result = ensureSpace(page, y, minSignatureHeight, pdfDoc, helveticaBold);
   page = result.page;
@@ -256,24 +256,28 @@ async function drawSignatureSection(page: any, y: number, signature: string | nu
   // Espaço após título
   y -= 8;
 
-  // Linha para "Responsável pela aprovação"
+  // Responsável pela aprovação
   drawTextSafely(page, "RESPONSÁVEL PELA APROVAÇÃO", { x: M, y, size: 9, font: helveticaBold, color: C.teal });
   y -= 18;
 
-  // Campo: Nome
-  drawTextSafely(page, "Nome:", { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
-  drawTextSafely(page, "_______________________________________________", { x: M + 60, y, size: 8, font: helvetica, color: C.medText });
-  y -= 16;
+  // Nome
+  drawTextSafely(page, `Nome: ${signerName || "_______________________________________________"}`, { x: M, y, size: 9, font: helvetica, color: C.darkText });
+  y -= 14;
 
-  // Campo: Data
+  // Cargo
+  if (signerRole) {
+    drawTextSafely(page, `Cargo: ${signerRole}`, { x: M, y, size: 9, font: helvetica, color: C.darkText });
+    y -= 14;
+  }
+
+  // Data
   const today = new Date().toLocaleDateString("pt-BR");
-  drawTextSafely(page, "Data:", { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
-  drawTextSafely(page, today, { x: M + 60, y, size: 8, font: helvetica, color: C.darkText });
-  y -= 16;
+  drawTextSafely(page, `Data: ${today}`, { x: M, y, size: 9, font: helvetica, color: C.darkText });
+  y -= 20;
 
-  // Campo: Assinatura
-  drawTextSafely(page, "Assinatura:", { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
-  y -= 10;
+  // Assinatura
+  drawTextSafely(page, "ASSINATURA DO RESPONSÁVEL", { x: M, y: y + 4, size: 9, font: helveticaBold, color: C.darkText });
+  y -= 14;
 
   // Se há assinatura digital, desenha a imagem
   if (signature?.startsWith("data:image/")) {
@@ -287,24 +291,23 @@ async function drawSignatureSection(page: any, y: number, signature: string | nu
         if (h > maxH) { h = maxH; w = h * ratio; }
         page.drawImage(img, { x: M, y: y - h, width: w, height: h });
         y -= h + 10;
+      } else {
+        throw new Error('Imagem não pôde ser carregada');
       }
     } catch (e) {
       console.error('[PDF] failed to embed signature:', e);
       // Fallback: linha para assinatura manuscrita
       page.drawLine({ start: { x: M, y }, end: { x: M + 280, y }, thickness: 0.8, color: C.border });
       y -= 20;
+      drawTextSafely(page, "[Erro ao carregar assinatura]", { x: M, y: y - 8, size: 8, font: helvetica, color: C.medText });
+      y -= 16;
     }
   } else {
     // Sem assinatura digital: desenha linha para assinatura manuscrita
     page.drawLine({ start: { x: M, y }, end: { x: M + 280, y }, thickness: 0.8, color: C.border });
     y -= 20;
-  }
-
-  // Linha de identificação do responsável (se houver nome)
-  const respName = customer.contactName || "";
-  if (respName) {
-    drawTextSafely(page, respName, { x: M, y, size: 8, font: helveticaBold, color: C.darkText });
-    y -= 12;
+    drawTextSafely(page, "Assinatura pendente", { x: M, y: y - 8, size: 8, font: helvetica, color: C.lightText });
+    y -= 16;
   }
 
   return { page, y };
@@ -329,7 +332,12 @@ export async function POST(req: NextRequest) {
       responsibleRole = order.responsibleRole || "",
       technicianName = order.technicianName || order.technician?.name || "",
       generalNotes = order.generalNotes || "",
-      signature = order.signature || null,
+      // signature pode vir como:
+      // - string (data:image/...) do frontend antigo
+      // - objeto { objectKey, signerName, signerRole } do pdf-data API
+      signature = order.signature?.objectKey || order.signature || null,
+      signerName = order.signature?.signerName || order.responsibleName || "",
+      signerRole = order.signature?.signerRole || order.responsibleRole || "",
     } = body;
 
     const pdfDoc = await PDFDocument.create();
@@ -573,7 +581,7 @@ export async function POST(req: NextRequest) {
     // Adiciona espaçamento visual entre observações e assinatura
     y -= 16; // gap entre seções
 
-    const sigResult = await drawSignatureSection(page, y, signature, pdfDoc, helvetica, helveticaBold, company, customer);
+    const sigResult = await drawSignatureSection(page, y, signature, pdfDoc, helvetica, helveticaBold, company, customer, signerName, signerRole);
     page = sigResult.page;
     y = sigResult.y;
 

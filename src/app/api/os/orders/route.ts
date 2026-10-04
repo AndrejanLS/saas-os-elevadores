@@ -130,7 +130,7 @@ export async function POST(request: Request) {
             photos: record.photos && record.photos.length > 0 ? {
               create: record.photos.map((photoData) => ({
                 companyId: session.companyId,
-                serviceOrderId: undefined as any, // Will be set by relation
+                serviceOrderId: undefined as any,
                 uploadedById: session.userId,
                 objectKey: photoData,
                 mimeType: "image/jpeg",
@@ -140,8 +140,22 @@ export async function POST(request: Request) {
             } : undefined,
           })),
         },
+        // Criar assinatura se enviada
+        ...(result.data.signature && result.data.responsibleName ? {
+          signature: {
+            create: {
+              companyId: session.companyId,
+              objectKey: result.data.signature,
+              signerName: result.data.responsibleName,
+              signerRole: result.data.responsibleRole || null,
+            }
+          }
+        } : {}),
       },
-      include: { records: { include: { photos: true } } },
+      include: {
+        records: { include: { photos: true } },
+        signature: true,
+      },
     });
   });
   return NextResponse.json({ order }, { status: 201 });

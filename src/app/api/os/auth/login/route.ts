@@ -7,11 +7,28 @@ import { createSessionToken } from "@/lib/os-auth";
 import { SESSION_COOKIE } from "@/lib/os-session";
 
 const loginSchema = z.object({
-  email: z.string().trim().min(1).max(160), // aceita "andrejan" sem @
+  email: z.string().trim().min(1).max(160),
   password: z.string().min(1).max(200),
 });
 
 export const runtime = "nodejs";
+
+type SameSiteType = "none" | "lax" | "strict";
+
+function getCookieOptions(request: Request): { secure: boolean; sameSite: SameSiteType } {
+  const isProduction = process.env.NODE_ENV === "production";
+  const host = request.headers.get("host") || "";
+  const isLocalhost = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  const isPrivateNetwork = host.includes("192.168.") || host.includes("10.") || host.includes("172.16.");
+
+  const secure = isProduction;
+  let sameSite: SameSiteType = "lax";
+  if (isProduction) sameSite = "none";
+  else if (isPrivateNetwork) sameSite = "none";  // Permite cookie em rede local (celular)
+  else if (isLocalhost) sameSite = "lax";        // localhost normal
+
+  return { secure, sameSite };
+}
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -37,13 +54,17 @@ export async function POST(request: Request) {
     role: user.role,
     name: user.name,
   });
+
   const cookieStore = await cookies();
+  const opts = getCookieOptions(request);
+
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: opts.secure,
+    sameSite: opts.sameSite,
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
   });
+
   return NextResponse.json({ success: true, redirectTo: "/os" });
 }

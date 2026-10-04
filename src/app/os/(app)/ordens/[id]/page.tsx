@@ -30,6 +30,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
   if (!order) notFound();
 
+  // Calcula formattedNumber para exibição
+  const year = Math.floor(order.number / 1000) || 0;
+  const seq = order.number % 1000 || 0;
+  const formattedNumber = year > 0 ? `${year.toString().slice(-2)}/${String(seq).padStart(3, "0")}` : "—";
+  const signatureBase64 = order.signature?.objectKey || null;
+  const signerName = order.signature?.signerName || order.responsibleName || null;
+  const signerRole = order.signature?.signerRole || order.responsibleRole || null;
+
   return (
     <main className="min-h-[100svh] bg-steel-50 px-4 py-6 sm:px-6 sm:py-10">
       <div className="mx-auto max-w-4xl">
@@ -40,7 +48,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-cyan-600 uppercase tracking-wide">Ordem de Serviço</p>
-            <h1 className="mt-1 text-2xl font-bold text-navy-950">OS {String(order.number).padStart(6, "0")}</h1>
+            <h1 className="mt-1 text-2xl font-bold text-navy-950">OS {formattedNumber}</h1>
             <p className="mt-1 text-sm text-steel-500">
               Aberta em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(order.openedAt)}
             </p>
@@ -235,6 +243,42 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-navy-700">{order.findingsNotes}</p>
           </section>
         )}
+
+        {/* Seção de Assinatura do Responsável */}
+        <section className="mt-4 rounded-xl border border-steel-200 bg-white p-4 sm:p-6">
+          <h2 className="font-bold text-navy-950">Assinatura do Responsável</h2>
+          <div className="mt-4 space-y-3">
+            {signatureBase64 ? (
+              <div className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <span className="text-xs font-semibold uppercase text-steel-400">Responsável pela aprovação</span>
+                    <p className="mt-1 text-navy-900 font-medium">{signerName || "Não informado"}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold uppercase text-steel-400">Cargo / Função</span>
+                    <p className="mt-1 text-navy-900">{signerRole || "Não informado"}</p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <span className="text-xs font-semibold uppercase text-steel-400">Assinatura</span>
+                  <img
+                    src={signatureBase64}
+                    alt="Assinatura do responsável"
+                    className="mt-2 w-full max-w-md h-32 border-2 border-emerald-500 bg-emerald-50 rounded-lg object-contain"
+                  />
+                </div>
+                <p className="text-xs text-emerald-600">Assinatura salva e vinculada a esta OS.</p>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-steel-500">
+                <FileText className="h-12 w-12 mx-auto text-steel-300" />
+                <p className="mt-2">Nenhuma assinatura registrada</p>
+                <p className="text-xs mt-1">A assinatura pode ser adicionada na edição da OS.</p>
+              </div>
+            )}
+          </div>
+        </section>
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <PdfButton orderId={order.id} />

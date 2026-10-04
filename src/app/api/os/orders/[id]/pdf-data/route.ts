@@ -26,11 +26,20 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const seq = order.number % 1000;
   const formattedNumber = `${year.toString().slice(-2)}/${String(seq).padStart(3, "0")}`;
 
+  // Inclui dados da assinatura para o PDF
+  const signatureData = order.signature ? {
+    objectKey: order.signature.objectKey,
+    signerName: order.signature.signerName,
+    signerRole: order.signature.signerRole,
+    createdAt: order.signature.createdAt,
+  } : null;
+
   return NextResponse.json({
     order: {
       ...order,
       formattedNumber, // "26/500"
       displayNumber: formattedNumber, // alias
+      signature: signatureData, // dados completos da assinatura
     }
   });
 }

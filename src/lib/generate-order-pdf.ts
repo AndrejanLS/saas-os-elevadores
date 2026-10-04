@@ -231,7 +231,11 @@ export async function generateOrderPdf(params: {
   const responsibleRole = order?.responsibleRole || params.responsibleRole || "";
   const technicianName = order?.technician?.name || order?.technicianName || params.technicianName || "";
   const generalNotes = order?.generalNotes || params.generalNotes || "";
-  const signature = order?.signature || params.signature || null;
+  // signature pode ser string (data:image/...) ou objeto { objectKey, signerName, signerRole }
+  const signatureObj = order?.signature || params.signature || null;
+  const signature = typeof signatureObj === 'string' ? signatureObj : signatureObj?.objectKey || null;
+  const signerName = typeof signatureObj === 'object' ? (signatureObj.signerName || responsibleName) : responsibleName;
+  const signerRole = typeof signatureObj === 'object' ? (signatureObj.signerRole || responsibleRole) : responsibleRole;
 
   const number: number = order?.number ?? 0;
   const formattedNumber = order?.formattedNumber || order?.displayNumber || "";
@@ -472,7 +476,7 @@ export async function generateOrderPdf(params: {
       }
 
       // Indicador visual de status (círculo)
-      page.drawCircle({
+      (page as any).drawCircle({
         x: M + 8,
         y: yPos + 4,
         radius: 3,
@@ -522,14 +526,17 @@ export async function generateOrderPdf(params: {
 
   // Rótulos das assinaturas (7cm abaixo da linha)
   drawText(page, "TÉCNICO RESPONSÁVEL", M, signatureY - signatureLabelOffset, 8, C.primary, helveticaBold);
-  drawText(page, "SÍNDICO / RESPONSÁVEL", PAGE_W / 2 + signatureSpacing, signatureY - signatureLabelOffset, 8, C.primary, helveticaBold);
+  drawText(page, "RESPONSÁVEL PELA APROVAÇÃO", PAGE_W / 2 + signatureSpacing, signatureY - signatureLabelOffset, 8, C.primary, helveticaBold);
+
+  // Nome do responsável
+  drawText(page, signerName || "_________________________", PAGE_W / 2 + signatureSpacing, signatureY - signatureLabelOffset - 12, 8, C.darkText, helvetica);
 
   // Assinatura digital (se houver) - posicionada acima dos rótulos
   if (signature) {
     try {
       const sigImage = await base64ToPdfImage(pdfDoc, signature);
       page.drawImage(sigImage, {
-        x: M + 5,
+        x: PAGE_W / 2 + signatureSpacing + 5,
         y: signatureY - signatureLabelOffset + 5,
         width: signatureLineWidth - 10,
         height: 50,
@@ -537,17 +544,24 @@ export async function generateOrderPdf(params: {
     } catch (error) {
       console.error("Erro ao carregar assinatura:", error);
       page.drawLine({
-        start: { x: M + 10, y: signatureY - signatureLabelOffset + 25 },
-        end: { x: M + signatureLineWidth - 10, y: signatureY - signatureLabelOffset + 25 },
+        start: { x: PAGE_W / 2 + signatureSpacing + 10, y: signatureY - signatureLabelOffset + 25 },
+        end: { x: PAGE_W / 2 + signatureSpacing + signatureLineWidth - 10, y: signatureY - signatureLabelOffset + 25 },
         thickness: 1.5,
         color: C.primary,
       });
     }
+  } else {
+    // Sem assinatura: linha pontilhada
+    page.drawLine({
+      start: { x: PAGE_W / 2 + signatureSpacing + 10, y: signatureY - signatureLabelOffset + 25 },
+      end: { x: PAGE_W / 2 + signatureSpacing + signatureLineWidth - 10, y: signatureY - signatureLabelOffset + 25 },
+      thickness: 1,
+      color: C.secondary,
+    });
   }
 
-  // Nome por extenso abaixo do rótulo
+  // Nome do técnico
   drawText(page, technicianName || "_________________________", M, signatureY - signatureLabelOffset - 12, 8, C.darkText, helvetica);
-  drawText(page, responsibleName || customer.contactName || "_________________________", PAGE_W / 2 + signatureSpacing, signatureY - signatureLabelOffset - 12, 8, C.darkText, helvetica);
 
   // Rodapé
   const footerY = 40;
