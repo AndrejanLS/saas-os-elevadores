@@ -17,7 +17,7 @@ export default async function OrdersPage() {
     },
   });
 
-  const orders = rawOrders.map((o) => ({
+  const orders = rawOrders.map((o: any) => ({
     id: o.id,
     number: o.number,
     status: o.status as string,
@@ -28,7 +28,7 @@ export default async function OrdersPage() {
     _count: { records: o._count.records, photos: o._count.photos },
   }));
 
-  const customers = [...new Set(rawOrders.map((o) => o.customer.name))].sort();
+  const customers = [...new Set(rawOrders.map((o: any) => o.customer.name))].sort() as string[];
 
   return <OrdersPageClient orders={orders} customers={customers} />;
 }

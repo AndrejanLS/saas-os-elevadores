@@ -198,7 +198,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         <section className="mt-4 rounded-xl border border-steel-200 bg-white p-4 sm:p-6">
           <h2 className="font-bold text-navy-950">Registros de manutenção ({order.records.length})</h2>
           <div className="mt-4 space-y-4">
-            {order.records.map((record, index) => (
+            {order.records.map((record: any, index: number) => (
               <article key={record.id} className="rounded-lg border border-steel-200 bg-steel-50 p-4">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">
@@ -208,7 +208,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-navy-700">{record.notes}</p>
                 {record.photos && record.photos.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {record.photos.map((photo, photoIndex) => (
+                    {record.photos.map((photo: any, photoIndex: number) => (
                       <img
                         key={photoIndex}
                         src={photo.objectKey}

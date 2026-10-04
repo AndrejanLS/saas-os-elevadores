@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, isDbAvailable } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -13,24 +13,28 @@ export async function GET() {
       OS_BOOTSTRAP_SECRET: process.env.OS_BOOTSTRAP_SECRET ? "set" : "MISSING",
       APP_URL: process.env.APP_URL || "not set",
     },
-    database: "unknown",
-    prisma: "unknown",
+    database: "unavailable",
+    prisma: "unavailable",
   };
 
-  // Test database connection
-  try {
-    await db.$queryRaw`SELECT 1`;
-    checks.database = "connected";
-  } catch (error) {
-    checks.database = `error: ${error instanceof Error ? error.message : "unknown"}`;
-  }
+  // Só testa se DB estiver disponível
+  if (isDbAvailable()) {
+    try {
+      await db.$queryRaw`SELECT 1`;
+      checks.database = "connected";
+    } catch (error) {
+      checks.database = `error: ${error instanceof Error ? error.message : "unknown"}`;
+    }
 
-  // Test Prisma client
-  try {
-    const userCount = await db.user.count();
-    checks.prisma = `ok (${userCount} users)`;
-  } catch (error) {
-    checks.prisma = `error: ${error instanceof Error ? error.message : "unknown"}`;
+    try {
+      const userCount = await db.user.count();
+      checks.prisma = `ok (${userCount} users)`;
+    } catch (error) {
+      checks.prisma = `error: ${error instanceof Error ? error.message : "unknown"}`;
+    }
+  } else {
+    checks.database = "DATABASE_URL not configured";
+    checks.prisma = "DATABASE_URL not configured";
   }
 
   const allOk = checks.database === "connected" && checks.prisma.startsWith("ok");

@@ -3,12 +3,28 @@ import bcrypt from "bcryptjs";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-export const db = globalForPrisma.prisma ?? new PrismaClient();
+// Lazy Prisma client - não instancia se DATABASE_URL não existir (build time)
+function createPrismaClient() {
+  if (!process.env.DATABASE_URL) {
+    return null as any;
+  }
+  return new PrismaClient();
+}
+
+export const db = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;
 
+// Helper para verificar se DB está disponível
+export function isDbAvailable(): boolean {
+  return !!process.env.DATABASE_URL && db !== null;
+}
+
 // Função para criar empresa e usuário de bootstrap
 export async function bootstrapCompany() {
+  if (!isDbAvailable()) {
+    throw new Error("DATABASE_URL não configurada");
+  }
   const existingCompany = await db.company.findFirst({
     where: { taxId: "00.000.000/0001-00" },
   });

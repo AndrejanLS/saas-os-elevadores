@@ -133,7 +133,7 @@ export default async function OsDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-steel-100">
-                {recentOrders.map((order) => {
+                {recentOrders.map((order: any) => {
                   const config = statusConfig[order.status];
                   return (
                     <tr key={order.id} className="hover:bg-steel-50 transition-colors">

@@ -76,7 +76,7 @@ export async function POST(request: Request) {
   });
   if (!customer) return NextResponse.json({ error: "Cliente inválido para esta empresa." }, { status: 400 });
 
-  const order = await db.$transaction(async (tx) => {
+  const order = await db.$transaction(async (tx: any) => {
     // Lock para evitar concorrência: pega última OS da empresa com FOR UPDATE
     const last = await tx.$queryRaw`
       SELECT number FROM "ServiceOrder"

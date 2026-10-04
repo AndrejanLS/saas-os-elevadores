@@ -55,7 +55,7 @@ export async function PUT(
 
   // Se tem assinatura nova, atualiza/cria Signature dentro de transação
   if (body.signature && body.responsibleName) {
-    await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx: any) => {
       if (existingOrder.signature) {
         await tx.signature.update({
           where: { id: existingOrder.signature.id },
