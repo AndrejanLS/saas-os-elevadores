@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
   try {
     // Força migrate deploy (sem skip) - válido para prisma 6.19.3
-    const execOut = execSync("npx prisma migrate deploy", {
+    const execOut = execSync("node node_modules/.bin/prisma migrate deploy", {
       env: { ...process.env },
       encoding: "utf-8",
       stdio: "pipe"
