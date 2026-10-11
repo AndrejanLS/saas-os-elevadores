@@ -20,7 +20,7 @@ export default function OsLoginPage() {
       const response = await fetch("/api/os/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier: email.trim().toLowerCase(), password }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Não foi possível entrar.");
@@ -49,10 +49,10 @@ export default function OsLoginPage() {
           <p className="mt-2 text-sm leading-6 text-steel-500">Entre para consultar clientes e registrar atendimentos.</p>
           <form className="mt-7 space-y-5" onSubmit={handleSubmit}>
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-navy-800">E-mail</span>
+              <span className="mb-2 block text-sm font-semibold text-navy-800">Usuário ou E-mail</span>
               <span className="flex h-12 items-center gap-3 rounded-lg border border-steel-300 px-3 focus-within:border-primary focus-within:ring-2 focus-within:ring-cyan-500/15">
                 <Mail aria-hidden="true" className="h-4 w-4 text-steel-400" />
-                <input autoComplete="username" className="h-full min-w-0 flex-1 bg-transparent text-base text-navy-900 outline-none placeholder:text-steel-400" type="text" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="andrejan@smartintech.com" />
+                <input autoComplete="username" autoCapitalize="none" className="h-full min-w-0 flex-1 bg-transparent text-base text-navy-900 outline-none placeholder:text-steel-400" type="text" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="andrejan ou andrejan@smartintech.com" />
               </span>
             </label>
             <label className="block">

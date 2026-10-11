@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -7,7 +6,7 @@ import { createSessionToken } from "@/lib/os-auth";
 import { SESSION_COOKIE } from "@/lib/os-session";
 
 const loginSchema = z.object({
-  email: z.string().trim().min(1).max(160),
+  identifier: z.string().trim().min(1).max(160),
   password: z.string().min(1).max(200),
 });
 
@@ -52,8 +51,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Busca por email OU username (case-insensitive)
+    const identifier = input.data.identifier.toLowerCase();
     const user = await db.user.findFirst({
-      where: { email: input.data.email.toLowerCase(), active: true },
+      where: {
+        active: true,
+        OR: [
+          { email: identifier },
+          { name: identifier },
+        ],
+      },
     });
     if (!user || !(await bcrypt.compare(input.data.password, user.passwordHash))) {
       return NextResponse.json({ error: "E-mail ou senha incorretos." }, { status: 401 });
@@ -66,18 +73,18 @@ export async function POST(request: Request) {
       name: user.name,
     });
 
-    const cookieStore = await cookies();
-    const opts = getCookieOptions(request);
+  const response = NextResponse.json({ success: true, redirectTo: "/os" });
+  const opts = getCookieOptions(request);
 
-    cookieStore.set(SESSION_COOKIE, token, {
-      httpOnly: true,
-      secure: opts.secure,
-      sameSite: opts.sameSite,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
-    });
+  response.cookies.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: opts.secure,
+    sameSite: opts.sameSite,
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+  });
 
-    return NextResponse.json({ success: true, redirectTo: "/os" });
+  return response;
   } catch (error) {
     console.error("[LOGIN] Erro interno:", error);
     const message = error instanceof Error ? error.message : "Erro interno do servidor";
