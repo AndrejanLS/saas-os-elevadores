@@ -16,20 +16,14 @@ export async function POST(request: Request) {
     // Primeiro: criar tabelas via SQL raw
     await createSchema();
 
-    // Depois: criar empresa e usuário bootstrap
+    // Depois: criar/ATUALIZAR empresa e usuário bootstrap
     const { company, user } = await bootstrapCompany();
-    if (!user) {
-      return NextResponse.json({
-        message: "Banco já foi inicializado anteriormente",
-        company: { id: company.id, tradeName: company.tradeName }
-      }, { status: 200 });
-    }
-
+    // user é null se já existia, mas senha foi atualizada via upsert
     return NextResponse.json({
       success: true,
-      message: "Banco inicializado e usuário criado com sucesso",
+      message: user ? "Banco inicializado e usuário criado" : "Banco já existia; senha do usuário padrão atualizada",
       company: { id: company.id, tradeName: company.tradeName },
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user?.id || "existing", name: "Andre Jan", email: "andrejan@smartintech.com" },
     });
   } catch (error) {
     console.error("Init DB error:", error);
