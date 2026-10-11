@@ -250,11 +250,12 @@ export async function bootstrapCompany() {
 
   const passwordHash = await bcrypt.hash("73710000", 10);
 
+  // Garante que o usuário existe e que a senha está atualizada
   const user = await db.user.upsert({
     where: {
       companyId_email: { companyId: company.id, email: "andrejan@smartintech.com" }
     },
-    update: {},
+    update: { passwordHash }, // SEMPRE atualiza senha se já existir
     create: {
       companyId: company.id,
       name: "Andre Jan",
