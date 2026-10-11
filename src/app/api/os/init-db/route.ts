@@ -1,51 +1,212 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { db, bootstrapCompany, isDbAvailable } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  // Verifica secret para segurança
-  let body: { secret?: string } = {};
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
-  }
-
-  const secret = body.secret;
-  const expectedSecret = process.env.OS_BOOTSTRAP_SECRET;
-
-  if (!expectedSecret) {
-    return NextResponse.json({ error: "OS_BOOTSTRAP_SECRET não configurada" }, { status: 500 });
-  }
-  if (secret !== expectedSecret) {
-    return NextResponse.json({ error: "Secret inválido" }, { status: 401 });
-  }
-
-  if (!process.env.DATABASE_URL) {
-    return NextResponse.json({ error: "DATABASE_URL não configurada" }, { status: 503 });
+  // Verifica se DB está disponível
+  if (!isDbAvailable()) {
+    return NextResponse.json({
+      error: "DATABASE_URL não configurada",
+      details: "Configure DATABASE_URL nas variáveis de ambiente"
+    }, { status: 503 });
   }
 
   try {
-    // Roda prisma migrate deploy para criar tabelas
-    const output = execSync("npx prisma migrate deploy", {
-      env: { ...process.env },
-      encoding: "utf-8",
-      cwd: process.cwd(),
-      stdio: "pipe"
-    });
+    // Primeiro: criar tabelas via SQL raw
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Company" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "legalName" TEXT NOT NULL,
+        "tradeName" TEXT,
+        "taxId" TEXT,
+        "address" TEXT,
+        "number" TEXT,
+        "complement" TEXT,
+        "neighborhood" TEXT,
+        "city" TEXT,
+        "state" TEXT,
+        "postalCode" TEXT,
+        "phone" TEXT,
+        "whatsapp" TEXT,
+        "email" TEXT,
+        "website" TEXT,
+        "logoObjectKey" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "User" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "email" TEXT NOT NULL,
+        "passwordHash" TEXT NOT NULL,
+        "role" TEXT NOT NULL DEFAULT 'TECHNICIAN',
+        "active" BOOLEAN NOT NULL DEFAULT true,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "User_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Customer" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "taxId" TEXT,
+        "address" TEXT,
+        "number" TEXT,
+        "complement" TEXT,
+        "neighborhood" TEXT,
+        "city" TEXT,
+        "state" TEXT,
+        "postalCode" TEXT,
+        "contactName" TEXT,
+        "phone" TEXT,
+        "email" TEXT,
+        "notes" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "Customer_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Elevator" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "customerId" TEXT NOT NULL,
+        "identification" TEXT NOT NULL,
+        "number" TEXT,
+        "manufacturer" TEXT,
+        "model" TEXT,
+        "capacity" TEXT,
+        "stops" TEXT,
+        "location" TEXT,
+        "type" TEXT,
+        "notes" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "Elevator_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Elevator_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "ServiceOrder" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "number" INTEGER NOT NULL,
+        "customerId" TEXT NOT NULL,
+        "elevatorId" TEXT NOT NULL,
+        "technicianId" TEXT NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'DRAFT',
+        "situation" TEXT,
+        "startTime" DATETIME,
+        "endTime" DATETIME,
+        "responsibleName" TEXT,
+        "responsibleRole" TEXT,
+        "generalNotes" TEXT,
+        "servicesNotes" TEXT,
+        "findingsNotes" TEXT,
+        "openedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "completedAt" DATETIME,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "ServiceOrder_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "ServiceOrder_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+        CONSTRAINT "ServiceOrder_elevatorId_fkey" FOREIGN KEY ("elevatorId") REFERENCES "Elevator" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+        CONSTRAINT "ServiceOrder_technicianId_fkey" FOREIGN KEY ("technicianId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "ServiceRecord" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "serviceOrderId" TEXT NOT NULL,
+        "authorId" TEXT NOT NULL,
+        "part" TEXT NOT NULL,
+        "customPart" TEXT,
+        "notes" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "ServiceRecord_serviceOrderId_fkey" FOREIGN KEY ("serviceOrderId") REFERENCES "ServiceOrder" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "ServiceRecord_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Photo" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "serviceOrderId" TEXT NOT NULL,
+        "serviceRecordId" TEXT,
+        "uploadedById" TEXT NOT NULL,
+        "objectKey" TEXT NOT NULL,
+        "mimeType" TEXT NOT NULL,
+        "sizeBytes" INTEGER NOT NULL,
+        "originalName" TEXT,
+        "caption" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Photo_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Photo_serviceOrderId_fkey" FOREIGN KEY ("serviceOrderId") REFERENCES "ServiceOrder" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Photo_serviceRecordId_fkey" FOREIGN KEY ("serviceRecordId") REFERENCES "ServiceRecord" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Photo_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      );`);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Signature" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "serviceOrderId" TEXT NOT NULL,
+        "objectKey" TEXT NOT NULL,
+        "signerName" TEXT NOT NULL,
+        "signerRole" TEXT,
+        "consentText" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Signature_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Signature_serviceOrderId_fkey" FOREIGN KEY ("serviceOrderId") REFERENCES "ServiceOrder" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );`);
+
+    // Criar índices
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Company_taxId_idx" ON "Company"("taxId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "User_companyId_active_idx" ON "User"("companyId", "active");`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_companyId_email_key" ON "User"("companyId", "email");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Customer_companyId_name_idx" ON "Customer"("companyId", "name");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Elevator_companyId_customerId_idx" ON "Elevator"("companyId", "customerId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ServiceOrder_companyId_status_openedAt_idx" ON "ServiceOrder"("companyId", "status", "openedAt");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ServiceOrder_companyId_customerId_idx" ON "ServiceOrder"("companyId", "customerId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ServiceOrder_companyId_elevatorId_idx" ON "ServiceOrder"("companyId", "elevatorId");`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "ServiceOrder_companyId_number_key" ON "ServiceOrder"("companyId", "number");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ServiceRecord_companyId_serviceOrderId_idx" ON "ServiceRecord"("companyId", "serviceOrderId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Photo_companyId_serviceOrderId_idx" ON "Photo"("companyId", "serviceOrderId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Photo_serviceRecordId_idx" ON "Photo"("serviceRecordId");`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Signature_serviceOrderId_key" ON "Signature"("serviceOrderId");`);
+
+    await prisma.$disconnect();
+
+    // Depois: criar empresa e usuário bootstrap
+    const { company, user } = await bootstrapCompany();
+    if (!user) {
+      return NextResponse.json({
+        message: "Banco já foi inicializado anteriormente",
+        company: { id: company.id, tradeName: company.tradeName }
+      }, { status: 200 });
+    }
+
     return NextResponse.json({
       success: true,
-      message: "Banco de dados inicializado com sucesso",
-      output
+      message: "Banco inicializado e usuário criado com sucesso",
+      company: { id: company.id, tradeName: company.tradeName },
+      user: { id: user.id, name: user.name, email: user.email },
     });
-  } catch (error: any) {
-    const msg = error.message || "Erro desconhecido";
-    const stdout = error.stdout || "";
-    const stderr = error.stderr || "";
+  } catch (error) {
+    console.error("Init DB error:", error);
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
     return NextResponse.json({
-      error: "Falha ao inicializar banco",
-      details: { msg, stdout, stderr }
+      error: "Erro ao inicializar banco",
+      details: message
     }, { status: 500 });
   }
 }
