@@ -22,13 +22,13 @@ export default async function OrdersPage() {
     number: o.number,
     status: o.status as string,
     openedAt: o.openedAt.toISOString(),
-    customer: { name: o.customer.name },
-    elevator: { identification: o.elevator.identification },
-    technician: { name: o.technician.name },
+    customer: { name: o.customer?.name ?? "—" },
+    elevator: { identification: o.elevator?.identification ?? "—" },
+    technician: { name: o.technician?.name ?? "—" },
     _count: { records: o._count.records, photos: o._count.photos },
   }));
 
-  const customers = [...new Set(rawOrders.map((o: any) => o.customer.name))].sort() as string[];
+  const customers = [...new Set(rawOrders.map((o: any) => o.customer?.name).filter(Boolean))].sort() as string[];
 
   return <OrdersPageClient orders={orders} customers={customers} />;
 }

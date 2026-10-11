@@ -17,13 +17,13 @@ export async function POST(request: Request) {
     const body = await request.json();
     const secret = body.secret;
     const expectedSecret = process.env.OS_BOOTSTRAP_SECRET;
-    
+
     if (!expectedSecret) {
-      return NextResponse.json({ 
-        error: "OS_BOOTSTRAP_SECRET não configurada no servidor" 
+      return NextResponse.json({
+        error: "OS_BOOTSTRAP_SECRET não configurada no servidor"
       }, { status: 500 });
     }
-    
+
     if (secret !== expectedSecret) {
       return NextResponse.json({ error: "Secret inválido" }, { status: 401 });
     }

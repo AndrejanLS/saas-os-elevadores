@@ -66,66 +66,66 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Cliente</dt>
-              <dd className="mt-1 font-semibold text-navy-900">{order.customer.name}</dd>
+              <dd className="mt-1 font-semibold text-navy-900">{order.customer?.name ?? "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">CNPJ / CPF</dt>
-              <dd className="mt-1 text-navy-900 font-mono">{order.customer.taxId || "—"}</dd>
+              <dd className="mt-1 text-navy-900 font-mono">{order.customer?.taxId || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Endereço</dt>
               <dd className="mt-1 text-navy-900">
                 {[
-                  order.customer.address,
-                  order.customer.number,
-                  order.customer.neighborhood,
-                  order.customer.city,
-                  order.customer.state,
-                  order.customer.postalCode,
+                  order.customer?.address,
+                  order.customer?.number,
+                  order.customer?.neighborhood,
+                  order.customer?.city,
+                  order.customer?.state,
+                  order.customer?.postalCode,
                 ].filter(Boolean).join(", ") || "—"}
               </dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Responsável</dt>
-              <dd className="mt-1 text-navy-900">{order.customer.contactName || "—"}</dd>
+              <dd className="mt-1 text-navy-900">{order.customer?.contactName || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Telefone</dt>
-              <dd className="mt-1 text-navy-900">{order.customer.phone || "—"}</dd>
+              <dd className="mt-1 text-navy-900">{order.customer?.phone || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">E-mail</dt>
-              <dd className="mt-1 text-navy-900">{order.customer.email || "—"}</dd>
+              <dd className="mt-1 text-navy-900">{order.customer?.email || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Elevador</dt>
-              <dd className="mt-1 font-semibold text-navy-900">{order.elevator.identification}</dd>
+              <dd className="mt-1 font-semibold text-navy-900">{order.elevator?.identification ?? "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Número do elevador</dt>
-              <dd className="mt-1 text-navy-900 font-mono">{order.elevator.number || "—"}</dd>
+              <dd className="mt-1 text-navy-900 font-mono">{order.elevator?.number || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Fabricante / Modelo</dt>
               <dd className="mt-1 text-navy-900">
-                {order.elevator.manufacturer || "—"} {order.elevator.model ? `/ ${order.elevator.model}` : ""}
+                {order.elevator?.manufacturer || "—"} {order.elevator?.model ? `/ ${order.elevator.model}` : ""}
               </dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Capacidade</dt>
-              <dd className="mt-1 text-navy-900">{order.elevator.capacity || "—"}</dd>
+              <dd className="mt-1 text-navy-900">{order.elevator?.capacity || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Paradas</dt>
-              <dd className="mt-1 text-navy-900">{order.elevator.stops || "—"}</dd>
+              <dd className="mt-1 text-navy-900">{order.elevator?.stops || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Localização</dt>
-              <dd className="mt-1 text-navy-900">{order.elevator.location || "—"}</dd>
+              <dd className="mt-1 text-navy-900">{order.elevator?.location || "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Técnico</dt>
-              <dd className="mt-1 font-semibold text-navy-900">{order.technician.name}</dd>
+              <dd className="mt-1 font-semibold text-navy-900">{order.technician?.name ?? "—"}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase text-steel-400">Situação</dt>

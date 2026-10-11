@@ -4,7 +4,12 @@ import { useState, useEffect, type FormEvent, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, X, Check, Trash2, Camera, Image, Loader2, AlertCircle, Building2, Search, FileText, Building } from "lucide-react";
+import SignatureCanvas from "react-signature-canvas";
 import { generateOrderPdf } from "@/lib/generate-order-pdf";
+
+// PNG fixo (linha preta sobre fundo branco) para o botão de teste de injeção no PDF
+const TEST_SIGNATURE_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAA8CAIAAABTvhANAAAAxUlEQVR4nO3TMREAIBDAsPdvGiQwcFwHEgVdOgtITR0AvzMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcRMCDETQsyEEDMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcRMCDETQsyEEDMhxA4TDnDNhBAzIcRMCDETQsyEELuaEHjNhBAzIcRMCDETQsyEEDMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcRMCDETQsyEEDMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcQ23TOL46DYubYAAAAASUVORK5CYII=";
 
 const SITUATIONS = [
   { value: "NORMAL", label: "Manutenção realizada normalmente" },
@@ -93,122 +98,20 @@ export default function NewOrderPage() {
   const [saving, setSaving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
-  // ========== ESTADOS DA ASSINATURA (robustos) ==========
+  // ========== ESTADOS DA ASSINATURA (react-signature-canvas) ==========
   type SignatureStatus = 'idle' | 'editing' | 'saving' | 'saved' | 'error';
-  const [signatureStatus, setSignatureStatus] = useState<SignatureStatus>('idle');
+  const [signatureStatus, setSignatureStatus] = useState<SignatureStatus>('editing');
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
-  const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sigCanvasRef = useRef<SignatureCanvas | null>(null);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Configura canvas com devicePixelRatio para assinatura nítida
-  useEffect(() => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.scale(dpr, dpr);
-  }, []);
-
-  // Restaura assinatura salva no canvas (se houver signatureDataUrl no state)
-  useEffect(() => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas || !signatureDataUrl) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const img = new window.Image();
-    img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      (canvas as any).signatureData = signatureDataUrl;
-    };
-    img.src = signatureDataUrl;
-  }, [signatureDataUrl]);
-
-  // ========== DESENHO DA ASSINATURA ==========
-  // Usa Pointer Events unificados para mouse/touch/stylus
-  // touchAction: none impede scroll da página durante desenho
-  const drawSignature = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (e.pointerType === 'touch') {
-      canvas.setPointerCapture(e.pointerId);
-    }
-
-    if (e.type === 'pointerdown') {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      (canvas as any).isDrawing = true;
-    } else if (e.type === 'pointermove' && (canvas as any).isDrawing) {
-      ctx.lineTo(x, y);
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-    } else if (e.type === 'pointerup' || e.type === 'pointerleave' || e.type === 'pointercancel') {
-      if (!(canvas as any).isDrawing) return;
-      (canvas as any).isDrawing = false;
-      if (e.pointerType === 'touch') {
-        try { canvas.releasePointerCapture(e.pointerId); } catch {}
-      }
-      (canvas as any).signatureData = canvas.toDataURL('image/png');
-    }
-  };
-
-  // ========== COMPRESSÃO/REDIMENSIONAMENTO DA ASSINATURA ==========
-  // Reduz o payload mantendo qualidade suficiente para PDF
-  const compressSignature = (dataUrl: string, maxWidth = 600, maxHeight = 200): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-
-        // Calcula escala mantendo proporção
-        if (width > maxWidth) {
-          height = height * (maxWidth / width);
-          width = maxWidth;
-        }
-        if (height > maxHeight) {
-          width = width * (maxHeight / height);
-          height = maxHeight;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          // PNG de alta qualidade (não JPEG - mantém transparência)
-          resolve(canvas.toDataURL('image/png'));
-        } else {
-          resolve(dataUrl);
-        }
-      };
-      img.src = dataUrl;
-    });
-  };
-
-  // ========== VALIDAÇÃO DE CANVAS VAZIO ==========
-  const isCanvasEmpty = (canvas: HTMLCanvasElement): boolean => {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return true;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    return imageData.data.every((v, i) => i % 4 === 3 ? v === 0 : v === 255);
+  // Captura a assinatura do pad como PNG (fundo branco opaco, sem transparência).
+  const captureSignaturePng = (): string | null => {
+    const pad = sigCanvasRef.current;
+    if (!pad || pad.isEmpty()) return null;
+    // toDataURL do signature_pad já renderiza sobre o backgroundColor branco opaco.
+    return pad.toDataURL('image/png');
   };
 
   // ========== SALVAMENTO NO BACKEND COM RETRY ==========
@@ -247,50 +150,53 @@ export default function NewOrderPage() {
     }
   };
 
-  // ========== CONFIRMAR ASSINATURA (fluxo completo) ==========
+  // ========== CONFIRMAR ASSINATURA (react-signature-canvas) ==========
   const handleConfirmSignature = async () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-
-    // Validação: canvas não pode estar vazio
-    if (isCanvasEmpty(canvas)) {
-      setSignatureError("A assinatura não pode estar vazia. Desenhe antes de confirmar.");
+    const pad = sigCanvasRef.current;
+    if (!pad) {
+      setSignatureError("Área de assinatura indisponível. Recarregue a página.");
       return;
     }
+
+    // Validação estrita: pad vazio bloqueia o fluxo
+    if (pad.isEmpty()) {
+      setSignatureError("Por favor, insira uma assinatura.");
+      return;
+    }
+
+    const dataUrl = pad.toDataURL('image/png');
+    console.log('[ASSINATURA] PNG capturado. Tamanho base64:', dataUrl.length);
+    console.log('[ASSINATURA] Preview:', dataUrl.substring(0, 80));
 
     setSignatureStatus('saving');
     setSignatureError(null);
 
     try {
-      const rawDataUrl = canvas.toDataURL('image/png');
-      const compressedDataUrl = await compressSignature(rawDataUrl);
-
-      // Atualiza UI imediatamente (optimistic update)
-      setSignatureDataUrl(compressedDataUrl);
-
-      // Salva no backend
-      const saved = await saveSignatureToBackend(compressedDataUrl);
-
+      setSignatureDataUrl(dataUrl);
+      const saved = await saveSignatureToBackend(dataUrl);
       if (saved) {
         setSignatureStatus('saved');
-        // Feedback visual de sucesso
-        setTimeout(() => setSignatureError(null), 3000);
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Erro ao salvar assinatura';
-      console.error('Erro ao salvar assinatura:', e);
+      console.error('[ASSINATURA] Erro:', e);
       setSignatureStatus('error');
-      setSignatureError(`${errorMsg}. A assinatura continua no canvas - clique em "Tentar novamente".`);
-      // NÃO limpa o canvas - usuário pode tentar novamente
+      setSignatureError(`${errorMsg}. Clique em "Tentar novamente".`);
     }
+  };
+
+  // ========== TESTE: injeta um PNG fixo (linha preta) no fluxo do PDF ==========
+  const handleTestImage = () => {
+    console.log('[ASSINATURA TESTE] Injetando PNG fixo de teste');
+    setSignatureDataUrl(TEST_SIGNATURE_PNG);
+    setSignatureStatus('saved');
+    setSignatureError(null);
   };
 
   // ========== TENTAR NOVAMENTE ==========
   const handleRetrySave = async () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-
-    if (isCanvasEmpty(canvas)) {
+    const dataUrl = signatureDataUrl || captureSignaturePng();
+    if (!dataUrl) {
       setSignatureError("A assinatura está vazia. Desenhe antes de tentar salvar.");
       return;
     }
@@ -299,13 +205,10 @@ export default function NewOrderPage() {
     setSignatureError(null);
 
     try {
-      const rawDataUrl = canvas.toDataURL('image/png');
-      const compressedDataUrl = await compressSignature(rawDataUrl);
-      const saved = await saveSignatureToBackend(compressedDataUrl);
-
+      setSignatureDataUrl(dataUrl);
+      const saved = await saveSignatureToBackend(dataUrl);
       if (saved) {
         setSignatureStatus('saved');
-        setSignatureDataUrl(compressedDataUrl);
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Erro ao salvar assinatura';
@@ -316,23 +219,18 @@ export default function NewOrderPage() {
 
   // ========== LIMPAR ASSINATURA ==========
   const handleClearSignature = () => {
+    sigCanvasRef.current?.clear();
     setSignatureDataUrl(null);
-    setSignatureStatus('idle');
+    setSignatureStatus('editing');
     setSignatureError(null);
-    const canvas = signatureCanvasRef.current;
-    if (canvas) {
-      (canvas as any).signatureData = undefined;
-      const ctx = canvas.getContext('2d');
-      ctx?.clearRect(0, 0, canvas.width, canvas.height);
-    }
   };
 
   // ========== REFAZER ASSINATURA (após já ter salvo) ==========
   const handleRedoSignature = () => {
-    // Só permite refazer se usuário clicar explicitamente
+    setSignatureDataUrl(null);
     setSignatureStatus('editing');
     setSignatureError(null);
-    // Mantém signatureDataUrl até user confirmar nova
+    // O pad é remontado em branco pelo próprio estado 'editing'
   };
 
   // Fetch company data for display
@@ -470,7 +368,20 @@ export default function NewOrderPage() {
     // Fallback: read customerId directly from DOM if state is empty
     const sel = document.querySelector('select') as HTMLSelectElement;
     const effectiveCustomerId = customerId || sel?.value || "";
-    console.log('[PDF] handleGeneratePDF called', { customerId, effectiveCustomerId, generatingPdf, saving });
+
+    console.log('=== GERAR PDF DEBUG ===');
+    console.log('[PDF] Estado signatureDataUrl:', signatureDataUrl ? 'EXISTS' : 'NULL');
+    console.log('[PDF] Estado signatureStatus:', signatureStatus);
+
+    // Prioriza o estado confirmado; se o pad ainda tem traço não confirmado, captura agora.
+    let finalSignature = signatureDataUrl || captureSignaturePng();
+
+    // LOGS DIAGNÓSTICOS
+    console.log('[PDF] === DIAGNÓSTICOS FINAIS ===');
+    console.log('[PDF] Assinatura está vazia?', !finalSignature);
+    console.log('[PDF] Tamanho do base64:', finalSignature ? finalSignature.length : 0);
+    console.log('[PDF] DataURL:', finalSignature ? finalSignature.substring(0, 100) : 'N/A');
+
     setError("");
     if (!effectiveCustomerId) {
       const msg = "Selecione o cliente para gerar o PDF.";
@@ -495,7 +406,7 @@ export default function NewOrderPage() {
         }
       }
 
-      console.log('[PDF] calling API generate-pdf...');
+      // USA finalSignature (COM FALLBACKS) EM VEZ DE signatureDataUrl
       const resp = await fetch('/api/os/orders/generate-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -511,8 +422,7 @@ export default function NewOrderPage() {
           responsibleRole,
           technicianName: "",
           generalNotes,
-          // Usa novo estado signatureDataUrl
-          signature: signatureDataUrl,
+          signature: finalSignature, // USA A ASSINATURA FINAL (COM FALLBACK)
           orderNumber: 0,
         }),
       });
@@ -971,16 +881,20 @@ export default function NewOrderPage() {
                     </p>
                   </div>
                   <div className="space-y-3">
-                    <canvas
-                      ref={signatureCanvasRef}
-                      className="w-full h-32 border-2 border-amber-300 bg-white rounded-lg touch-none cursor-crosshair"
-                      onPointerDown={drawSignature}
-                      onPointerMove={drawSignature}
-                      onPointerUp={drawSignature}
-                      onPointerLeave={drawSignature}
-                      onPointerCancel={drawSignature}
-                      style={{ touchAction: 'none' }}
-                    />
+                    <div className="w-full h-32 border-2 border-amber-300 bg-white rounded-lg overflow-hidden">
+                      <SignatureCanvas
+                        ref={sigCanvasRef}
+                        penColor="#0f172a"
+                        backgroundColor="rgba(255,255,255,1)"
+                        dotSize={2}
+                        minWidth={1.5}
+                        maxWidth={2.5}
+                        canvasProps={{
+                          className: 'w-full h-full cursor-crosshair touch-none',
+                          style: { touchAction: 'none' },
+                        }}
+                      />
+                    </div>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -1015,18 +929,30 @@ export default function NewOrderPage() {
               )}
 
               {/* ESTADO: EDITANDO (canvas aberto) */}
-              {signatureStatus === 'editing' && (
+              {(signatureStatus === 'editing' || signatureStatus === 'idle') && !signatureDataUrl && (
                 <div className="space-y-3">
-                  <canvas
-                    ref={signatureCanvasRef}
-                    className="w-full h-32 border-2 border-steel-300 bg-white rounded-lg touch-none cursor-crosshair"
-                    onPointerDown={drawSignature}
-                    onPointerMove={drawSignature}
-                    onPointerUp={drawSignature}
-                    onPointerLeave={drawSignature}
-                    onPointerCancel={drawSignature}
-                    style={{ touchAction: 'none' }}
-                  />
+                  {signatureError && (
+                    <div className="p-3 rounded-lg border border-amber-300 bg-amber-50">
+                      <p className="text-sm font-semibold text-amber-800 flex items-center gap-1">
+                        <AlertCircle className="h-4 w-4" />
+                        {signatureError}
+                      </p>
+                    </div>
+                  )}
+                  <div className="w-full h-32 border-2 border-steel-300 bg-white rounded-lg overflow-hidden">
+                    <SignatureCanvas
+                      ref={sigCanvasRef}
+                      penColor="#0f172a"
+                      backgroundColor="rgba(255,255,255,1)"
+                      dotSize={2}
+                      minWidth={1.5}
+                      maxWidth={2.5}
+                      canvasProps={{
+                        className: 'w-full h-full cursor-crosshair touch-none',
+                        style: { touchAction: 'none' },
+                      }}
+                    />
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -1045,20 +971,15 @@ export default function NewOrderPage() {
                       Confirmar
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleTestImage}
+                    className="w-full rounded-lg border border-dashed border-steel-300 bg-steel-50 px-4 py-2 text-xs font-semibold text-steel-600 hover:bg-steel-100 transition-colors"
+                  >
+                    Testar Imagem no PDF (injeta traço fixo)
+                  </button>
                   <p className="mt-1 text-xs text-steel-500">Desenhe com o dedo (celular) ou mouse. Toque em Confirmar para salvar.</p>
                 </div>
-              )}
-
-              {/* ESTADO: IDLE (nada ainda) - botão para começar */}
-              {signatureStatus === 'idle' && !signatureDataUrl && (
-                <button
-                  type="button"
-                  onClick={() => setSignatureStatus('editing')}
-                  className="flex items-center justify-center gap-2 h-20 w-full border-2 border-dashed border-steel-300 rounded-lg text-steel-500 hover:border-cyan-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors"
-                >
-                  <FileText className="h-5 w-5" />
-                  <span>Adicionar assinatura</span>
-                </button>
               )}
             </div>
           </label>

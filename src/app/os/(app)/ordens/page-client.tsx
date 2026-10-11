@@ -29,12 +29,12 @@ export default function OrdersPage({ orders: initialOrders, customers: allCustom
     return initialOrders.filter((order) => {
       const searchLower = search.toLowerCase();
       const matchesSearch = !search ||
-        order.customer.name.toLowerCase().includes(searchLower) ||
-        order.elevator.identification.toLowerCase().includes(searchLower) ||
-        order.technician.name.toLowerCase().includes(searchLower);
+        (order.customer?.name || "").toLowerCase().includes(searchLower) ||
+        (order.elevator?.identification || "").toLowerCase().includes(searchLower) ||
+        (order.technician?.name || "").toLowerCase().includes(searchLower);
 
       const matchesStatus = !statusFilter || order.status === statusFilter;
-      const matchesCustomer = !customerFilter || order.customer.name === customerFilter;
+      const matchesCustomer = !customerFilter || order.customer?.name === customerFilter;
 
       return matchesSearch && matchesStatus && matchesCustomer;
     });
@@ -132,8 +132,8 @@ export default function OrdersPage({ orders: initialOrders, customers: allCustom
                         {new Intl.DateTimeFormat("pt-BR").format(new Date(order.openedAt))}
                       </span>
                     </p>
-                    <p className="mt-1 text-sm text-steel-600">{order.customer.name} · {order.elevator.identification}</p>
-                    <p className="mt-1 text-xs text-steel-400">Técnico: {order.technician.name}</p>
+                    <p className="mt-1 text-sm text-steel-600">{order.customer?.name ?? "—"} · {order.elevator?.identification ?? "—"}</p>
+                    <p className="mt-1 text-xs text-steel-400">Técnico: {order.technician?.name ?? "—"}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-steel-400">

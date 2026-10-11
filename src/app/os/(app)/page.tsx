@@ -140,9 +140,9 @@ export default async function OsDashboardPage() {
                       <td className="py-4 pr-4 font-mono text-sm font-medium text-navy-900">
                         OS {String(order.number).padStart(6, "0")}
                       </td>
-                      <td className="py-4 pr-4 text-sm text-navy-900">{order.customer.name}</td>
-                      <td className="py-4 pr-4 text-sm text-steel-600">{order.elevator.identification}</td>
-                      <td className="py-4 pr-4 text-sm text-steel-600">{order.technician.name}</td>
+                      <td className="py-4 pr-4 text-sm text-navy-900">{order.customer?.name ?? "—"}</td>
+                      <td className="py-4 pr-4 text-sm text-steel-600">{order.elevator?.identification ?? "—"}</td>
+                      <td className="py-4 pr-4 text-sm text-steel-600">{order.technician?.name ?? "—"}</td>
                       <td className="py-4 pr-4">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${config.bg} ${config.text}`}>
                           {config.icon}

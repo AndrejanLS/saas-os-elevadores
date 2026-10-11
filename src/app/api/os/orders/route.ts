@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
   // Handle elevator - either existing ID or new identification
   let elevatorId: string;
-  if (result.data.elevatorId) {
+  if (result.data.elevatorId && result.data.elevatorId !== "__new__") {
     const elevator = await db.elevator.findFirst({
       where: { id: result.data.elevatorId, companyId: session.companyId, customerId: result.data.customerId },
       select: { id: true }

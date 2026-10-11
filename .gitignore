@@ -39,3 +39,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Banco de dados local
+*.db
+prisma/dev.db*
+prisma/dev.db-journal
+
+# Arquivos de teste (PDFs e scripts)
+test-*.pdf
+teste-*.pdf
+TESTE-*.pdf
+debug-*.js
+test-*.js
+teste-*.js
+gen-test-png.js
+test-signature.html
+
+# Relatórios
+RELATORIO-*.md
+CORRECOES-*.md

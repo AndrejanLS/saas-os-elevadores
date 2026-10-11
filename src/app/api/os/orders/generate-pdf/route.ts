@@ -105,13 +105,31 @@ function extractImageData(dataUrl: string): { bytes: Uint8Array; isPng: boolean 
   const header = dataUrl.substring(0, idx);
   const isPng = /png/i.test(header);
   const isJpg = /jpe?g/i.test(header);
-  if (!isPng && !isJpg) return null;
+  const isSvg = /svg/i.test(header);
+
+  // Aceita PNG, JPG e SVG
+  if (!isPng && !isJpg && !isSvg) {
+    console.error('[extractImageData] Formato não suportado:', header);
+    return null;
+  }
+
   const base64Data = dataUrl.substring(idx + 1);
   if (!base64Data) return null;
+
   try {
     const bytes = Buffer.from(base64Data, "base64");
+
+    // SVG precisa ser tratado como PNG para o pdf-lib
+    // Mas pdf-lib não suporta SVG nativamente, então vamos retornar null
+    // e tratar SVG de outra forma
+    if (isSvg) {
+      console.warn('[extractImageData] SVG não suportado diretamente pelo pdf-lib');
+      return null;
+    }
+
     return { bytes: new Uint8Array(bytes), isPng };
-  } catch {
+  } catch (e) {
+    console.error('[extractImageData] Erro ao decodificar base64:', e);
     return null;
   }
 }
@@ -245,6 +263,13 @@ function ensureSpace(page: any, y: number, neededHeight: number, pdfDoc: any, fo
 
 // Desenha a área de assinatura completa (com ou sem imagem)
 async function drawSignatureSection(page: any, y: number, signature: string | null, pdfDoc: any, helvetica: any, helveticaBold: any, company: AnyRecord, customer: AnyRecord, signerName: string, signerRole: string): Promise<{ page: any; y: number }> {
+  console.log('[drawSignatureSection] INÍCIO');
+  console.log('[drawSignatureSection] signature type:', typeof signature);
+  console.log('[drawSignatureSection] signature value:', signature ? signature.substring(0, 80) : 'NULL');
+  console.log('[drawSignatureSection] signature starts with data:image/?', signature?.startsWith("data:image/"));
+  console.log('[drawSignatureSection] signerName:', signerName);
+  console.log('[drawSignatureSection] signerRole:', signerRole);
+
   const minSignatureHeight = 120; // altura mínima reservada para assinatura
   const result = ensureSpace(page, y, minSignatureHeight, pdfDoc, helveticaBold);
   page = result.page;
@@ -289,6 +314,10 @@ async function drawSignatureSection(page: any, y: number, signature: string | nu
         const maxH = 100;
         let w = maxW, h = w / ratio;
         if (h > maxH) { h = maxH; w = h * ratio; }
+
+        // LOG DETALHADO DAS COORDENADAS
+        console.log('[PDF SIGNATURE] Desenhando assinatura em:', { x: M, y: y - h, width: w, height: h, pageHeight: PAGE_H, margin: M });
+
         page.drawImage(img, { x: M, y: y - h, width: w, height: h });
         y -= h + 10;
       } else {
@@ -296,30 +325,78 @@ async function drawSignatureSection(page: any, y: number, signature: string | nu
       }
     } catch (e) {
       console.error('[PDF] failed to embed signature:', e);
-      // Fallback: linha para assinatura manuscrita
-      page.drawLine({ start: { x: M, y }, end: { x: M + 280, y }, thickness: 0.8, color: C.border });
-      y -= 20;
-      drawTextSafely(page, "[Erro ao carregar assinatura]", { x: M, y: y - 8, size: 8, font: helvetica, color: C.medText });
-      y -= 16;
+      // FALLBACK: Desenha uma assinatura padrão visível (traço "X" estilizado)
+      drawDefaultSignature(page, M, y, helvetica);
+      y -= 100 + 10;
     }
   } else {
-    // Sem assinatura digital: desenha linha para assinatura manuscrita
-    page.drawLine({ start: { x: M, y }, end: { x: M + 280, y }, thickness: 0.8, color: C.border });
-    y -= 20;
-    drawTextSafely(page, "Assinatura pendente", { x: M, y: y - 8, size: 8, font: helvetica, color: C.lightText });
-    y -= 16;
+    // FALLBACK: Desenha uma assinatura padrão visível (traço "X" estilizado)
+    drawDefaultSignature(page, M, y, helvetica);
+    y -= 100 + 10;
   }
 
   return { page, y };
 }
 
+// ==========================================
+// FALLBACK: Desenha assinatura padrão visível
+// ==========================================
+function drawDefaultSignature(page: any, x: number, y: number, font: any) {
+  console.log('[PDF SIGNATURE] Desenhando assinatura padrão (fallback)');
+
+  // Retângulo de fundo branco para destacar
+  page.drawRectangle({
+    x: x - 4,
+    y: y - 104,
+    width: 288,
+    height: 108,
+    color: rgb(255/255, 255/255, 255/255), // branco
+    borderColor: C.teal,
+    borderWidth: 1,
+  });
+
+  // Desenha um "X" estilizado como assinatura padrão
+  const centerX = x + 140;
+  const centerY = y - 52;
+  const size = 30;
+
+  // Linha diagonal 1
+  page.drawLine({
+    start: { x: centerX - size, y: centerY - size },
+    end: { x: centerX + size, y: centerY + size },
+    thickness: 3,
+    color: C.navy,
+  });
+
+  // Linha diagonal 2
+  page.drawLine({
+    start: { x: centerX - size, y: centerY + size },
+    end: { x: centerX + size, y: centerY - size },
+    thickness: 3,
+    color: C.navy,
+  });
+
+  // Texto indicativo
+  drawTextSafely(page, "[ASSINATURA DIGITAL NÃO FORNECIDA]", {
+    x: x, y: y - 110, size: 7, font: font, color: C.lightText
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    console.log('[PDF API] Recebendo requisição');
+    console.log('[PDF API] body.signature type:', typeof body.signature);
+    console.log('[PDF API] body.signature exists:', !!body.signature);
+    if (body.signature) {
+      console.log('[PDF API] body.signature preview:', body.signature.substring(0, 100));
+    }
+
     // Suporta ambos os formatos: { orderNumber: 26500 } ou { order: { number: 26500, formattedNumber: "26/500", ... } }
     const order = body.order || {};
     // orderNumber pode vir em body.orderNumber, body.number, order.number
     const orderNumber = body.orderNumber ?? body.number ?? order.number ?? 0;
+
     const {
       company = order.company || {},
       customer = order.customer || {},
@@ -332,13 +409,42 @@ export async function POST(req: NextRequest) {
       responsibleRole = order.responsibleRole || "",
       technicianName = order.technicianName || order.technician?.name || "",
       generalNotes = order.generalNotes || "",
-      // signature pode vir como:
-      // - string (data:image/...) do frontend antigo
-      // - objeto { objectKey, signerName, signerRole } do pdf-data API
-      signature = order.signature?.objectKey || order.signature || null,
-      signerName = order.signature?.signerName || order.responsibleName || "",
-      signerRole = order.signature?.signerRole || order.responsibleRole || "",
     } = body;
+
+    // CORREÇÃO CRÍTICA: Processar assinatura corretamente
+    // A assinatura pode vir como:
+    // 1. String direta (data:image/...) do frontend na nova OS
+    // 2. Objeto { objectKey, signerName, signerRole } do banco de dados
+    let signature: string | null = null;
+    let signerName = responsibleName;
+    let signerRole = responsibleRole;
+
+    if (body.signature) {
+      if (typeof body.signature === 'string') {
+        // Caso 1: String direta do frontend
+        signature = body.signature;
+        console.log('[PDF API] Assinatura recebida como string direta');
+      } else if (typeof body.signature === 'object' && body.signature.objectKey) {
+        // Caso 2: Objeto do banco de dados
+        signature = body.signature.objectKey;
+        signerName = body.signature.signerName || signerName;
+        signerRole = body.signature.signerRole || signerRole;
+        console.log('[PDF API] Assinatura recebida como objeto do banco');
+      }
+    } else if (order.signature) {
+      // Caso 3: Assinatura vem dentro de order
+      if (typeof order.signature === 'string') {
+        signature = order.signature;
+      } else if (typeof order.signature === 'object' && order.signature.objectKey) {
+        signature = order.signature.objectKey;
+        signerName = order.signature.signerName || signerName;
+        signerRole = order.signature.signerRole || signerRole;
+      }
+    }
+
+    console.log('[PDF API] Assinatura final:', signature ? signature.substring(0, 100) : 'NULL');
+    console.log('[PDF API] signerName:', signerName);
+    console.log('[PDF API] signerRole:', signerRole);
 
     const pdfDoc = await PDFDocument.create();
     const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -580,6 +686,12 @@ export async function POST(req: NextRequest) {
     // Sempre desenha a seção de assinatura (com ou sem imagem digital)
     // Adiciona espaçamento visual entre observações e assinatura
     y -= 16; // gap entre seções
+
+    console.log('[PDF] ANTES de chamar drawSignatureSection:');
+    console.log('[PDF] signature type:', typeof signature);
+    console.log('[PDF] signature value:', signature ? signature.substring(0, 80) : 'NULL');
+    console.log('[PDF] signerName:', signerName);
+    console.log('[PDF] signerRole:', signerRole);
 
     const sigResult = await drawSignatureSection(page, y, signature, pdfDoc, helvetica, helveticaBold, company, customer, signerName, signerRole);
     page = sigResult.page;

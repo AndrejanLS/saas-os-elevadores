@@ -67,7 +67,7 @@ export const recordSchema = z.object({
 
 export const serviceOrderSchema = z.object({
   customerId: z.string().uuid(),
-  elevatorId: z.string().uuid().optional().or(z.literal("")),
+  elevatorId: z.string().uuid().optional().or(z.literal("__new__")).or(z.literal("")),
   elevatorIdentification: optionalText(120),
   situation: z.enum(["NORMAL", "WITH_NOTES", "QUOTE_REQUIRED", "IRREGULARITY"]).optional(),
   startTime: z.string().optional().nullable(),
