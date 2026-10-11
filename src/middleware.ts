@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isDbAvailable, bootstrapCompany } from "@/lib/db";
 
 const MASTER_KEY = process.env.MASTER_ACCESS_KEY;
 const SESSION_COOKIE = "saas_os_elevadores_session";
