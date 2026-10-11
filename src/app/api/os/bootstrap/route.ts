@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       success: true,
       company: { id: company.id, tradeName: company.tradeName },
       user: { id: user.id, name: user.name, email: user.email },
-      credentials: { email: "admin@elevadoresdemo.com.br", password: "123456" },
+      credentials: { email: "andrejan@smartintech.com", password: "73710000" },
     });
   } catch (error) {
     console.error("Bootstrap error:", error);
