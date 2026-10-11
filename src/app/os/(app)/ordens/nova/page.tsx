@@ -1,15 +1,11 @@
 "use client";
 
-import { useState, useEffect, type FormEvent, useRef } from "react";
+import { useState, useEffect, useCallback, type FormEvent, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, X, Check, Trash2, Camera, Image, Loader2, AlertCircle, Building2, Search, FileText, Building } from "lucide-react";
 import SignatureCanvas from "react-signature-canvas";
 import { generateOrderPdf } from "@/lib/generate-order-pdf";
-
-// PNG fixo (linha preta sobre fundo branco) para o botão de teste de injeção no PDF
-const TEST_SIGNATURE_PNG =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAA8CAIAAABTvhANAAAAxUlEQVR4nO3TMREAIBDAsPdvGiQwcFwHEgVdOgtITR0AvzMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcRMCDETQsyEEDMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcRMCDETQsyEEDMhxA4TDnDNhBAzIcRMCDETQsyEELuaEHjNhBAzIcRMCDETQsyEEDMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcRMCDETQsyEEDMhxEwIMRNCzIQQMyHETAgxE0LMhBAzIcQ23TOL46DYubYAAAAASUVORK5CYII=";
 
 const SITUATIONS = [
   { value: "NORMAL", label: "Manutenção realizada normalmente" },
@@ -106,12 +102,25 @@ export default function NewOrderPage() {
   const sigCanvasRef = useRef<SignatureCanvas | null>(null);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  // Callback estável: captura o PNG do pad ao final de cada traço.
+  // Guarda em estado para não depender do canvas no momento do Confirm/PDF.
+  const handleSignatureEnd = useCallback(() => {
+    const pad = sigCanvasRef.current;
+    if (pad && !pad.isEmpty()) {
+      setSignatureDataUrl(captureSignaturePng());
+    }
+  }, []);
+
   // Captura a assinatura do pad como PNG (fundo branco opaco, sem transparência).
   const captureSignaturePng = (): string | null => {
     const pad = sigCanvasRef.current;
     if (!pad || pad.isEmpty()) return null;
-    // toDataURL do signature_pad já renderiza sobre o backgroundColor branco opaco.
-    return pad.toDataURL('image/png');
+    try {
+      // Canvas aparado (só a área assinada) — mais leve para o PDF.
+      return pad.getTrimmedCanvas().toDataURL('image/png');
+    } catch {
+      return pad.toDataURL('image/png');
+    }
   };
 
   // ========== SALVAMENTO NO BACKEND COM RETRY ==========
@@ -152,20 +161,23 @@ export default function NewOrderPage() {
 
   // ========== CONFIRMAR ASSINATURA (react-signature-canvas) ==========
   const handleConfirmSignature = async () => {
+    // Só confirma se já temos o PNG capturado no onEnd (leiaute do dedo/traço).
+    // Se o pad ainda tem traço não capturado, captura agora.
     const pad = sigCanvasRef.current;
-    if (!pad) {
-      setSignatureError("Área de assinatura indisponível. Recarregue a página.");
-      return;
+    let dataUrl = signatureDataUrl;
+
+    if (pad && !pad.isEmpty()) {
+      // Pad tem traço — captura direto (mais recente)
+      dataUrl = captureSignaturePng();
     }
 
-    // Validação estrita: pad vazio bloqueia o fluxo
-    if (pad.isEmpty()) {
+    // Se o pad está vazio mas temos PNG salvo (ex: após clearOnResize), usa o salvo
+    if (!dataUrl) {
       setSignatureError("Por favor, insira uma assinatura.");
       return;
     }
 
-    const dataUrl = pad.toDataURL('image/png');
-    console.log('[ASSINATURA] PNG capturado. Tamanho base64:', dataUrl.length);
+    console.log('[ASSINATURA] PNG confirmado. Tamanho base64:', dataUrl.length);
     console.log('[ASSINATURA] Preview:', dataUrl.substring(0, 80));
 
     setSignatureStatus('saving');
@@ -183,14 +195,6 @@ export default function NewOrderPage() {
       setSignatureStatus('error');
       setSignatureError(`${errorMsg}. Clique em "Tentar novamente".`);
     }
-  };
-
-  // ========== TESTE: injeta um PNG fixo (linha preta) no fluxo do PDF ==========
-  const handleTestImage = () => {
-    console.log('[ASSINATURA TESTE] Injetando PNG fixo de teste');
-    setSignatureDataUrl(TEST_SIGNATURE_PNG);
-    setSignatureStatus('saved');
-    setSignatureError(null);
   };
 
   // ========== TENTAR NOVAMENTE ==========
@@ -374,13 +378,13 @@ export default function NewOrderPage() {
     console.log('[PDF] Estado signatureStatus:', signatureStatus);
 
     // Prioriza o estado confirmado; se o pad ainda tem traço não confirmado, captura agora.
-    let finalSignature = signatureDataUrl || captureSignaturePng();
+    const finalSignature = signatureDataUrl || captureSignaturePng();
 
-    // LOGS DIAGNÓSTICOS
-    console.log('[PDF] === DIAGNÓSTICOS FINAIS ===');
-    console.log('[PDF] Assinatura está vazia?', !finalSignature);
-    console.log('[PDF] Tamanho do base64:', finalSignature ? finalSignature.length : 0);
-    console.log('[PDF] DataURL:', finalSignature ? finalSignature.substring(0, 100) : 'N/A');
+    // BLOQUEIO: sem assinatura não gera PDF com "X" de fallback
+    if (!finalSignature) {
+      setSignatureError("Por favor, insira uma assinatura.");
+      return;
+    }
 
     setError("");
     if (!effectiveCustomerId) {
@@ -884,6 +888,8 @@ export default function NewOrderPage() {
                     <div className="w-full h-32 border-2 border-amber-300 bg-white rounded-lg overflow-hidden">
                       <SignatureCanvas
                         ref={sigCanvasRef}
+                        clearOnResize={false}
+                        onEnd={handleSignatureEnd}
                         penColor="#0f172a"
                         backgroundColor="rgba(255,255,255,1)"
                         dotSize={2}
@@ -942,6 +948,8 @@ export default function NewOrderPage() {
                   <div className="w-full h-32 border-2 border-steel-300 bg-white rounded-lg overflow-hidden">
                     <SignatureCanvas
                       ref={sigCanvasRef}
+                      clearOnResize={false}
+                      onEnd={handleSignatureEnd}
                       penColor="#0f172a"
                       backgroundColor="rgba(255,255,255,1)"
                       dotSize={2}
@@ -971,14 +979,6 @@ export default function NewOrderPage() {
                       Confirmar
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleTestImage}
-                    className="w-full rounded-lg border border-dashed border-steel-300 bg-steel-50 px-4 py-2 text-xs font-semibold text-steel-600 hover:bg-steel-100 transition-colors"
-                  >
-                    Testar Imagem no PDF (injeta traço fixo)
-                  </button>
-                  <p className="mt-1 text-xs text-steel-500">Desenhe com o dedo (celular) ou mouse. Toque em Confirmar para salvar.</p>
                 </div>
               )}
             </div>
