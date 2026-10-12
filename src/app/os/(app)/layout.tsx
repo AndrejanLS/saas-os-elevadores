@@ -4,6 +4,12 @@ import { requireSession } from "@/lib/os-session";
 import { db, isDbAvailable } from "@/lib/db";
 import { Plus, Users, Building2, ClipboardList, Building, TrendingUp } from "lucide-react";
 
+// BYPASS DE EMERGÊNCIA para tela /os quando DB falhar
+import { redirect } from "next/navigation";
+import { requireSession } from "@/lib/os-session";
+import { db, isDbAvailable } from "@/lib/db";
+import { Plus, Users, Building2, ClipboardList, Building, TrendingUp } from "lucide-react";
+
 export default async function OsLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
 
