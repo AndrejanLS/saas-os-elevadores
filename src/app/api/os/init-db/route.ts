@@ -4,6 +4,15 @@ import { db, bootstrapCompany, isDbAvailable, createSchema } from "@/lib/db";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  return initializeDatabase();
+}
+
+// GET também permite via navegador (para facilitar first deploy no Hostinger)
+export async function GET(request: Request) {
+  return initializeDatabase();
+}
+
+async function initializeDatabase() {
   // Verifica se DB está disponível
   if (!isDbAvailable()) {
     return NextResponse.json({
