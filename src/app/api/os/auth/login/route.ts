@@ -12,6 +12,16 @@ const loginSchema = z.object({
 
 export const runtime = "nodejs";
 
+// BYPASS DE EMERGÊNCIA - Credenciais fixas para destravar acesso na Hostinger
+const EMERGENCY_CREDENTIALS = {
+  username: "andrejan",
+  email: "andrejan@smartintech.com",
+  password: "73710000",
+  companyId: "company-andrejan",
+  userId: "user-andrejan",
+  name: "Andre Jan",
+};
+
 type SameSiteType = "none" | "lax" | "strict";
 
 function getCookieOptions(request: Request): { secure: boolean; sameSite: SameSiteType } {
@@ -29,6 +39,16 @@ function getCookieOptions(request: Request): { secure: boolean; sameSite: SameSi
   return { secure, sameSite };
 }
 
+function createTokenWithFixedData() {
+  // Cria o payload EXATO para o JWT com dados fixos do bypass
+  return createSessionToken({
+    userId: EMERGENCY_CREDENTIALS.userId,
+    companyId: EMERGENCY_CREDENTIALS.companyId,
+    role: "ADMIN",
+    name: EMERGENCY_CREDENTIALS.name,
+  });
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -38,21 +58,89 @@ export async function POST(request: Request) {
   }
 
   const input = loginSchema.safeParse(body);
-  if (!input.success) return NextResponse.json({ error: "Informe e-mail e senha válidos." }, { status: 400 });
+  if (!input.success) {
+    return NextResponse.json({ error: "Informe usuário/e-mail e senha válidos." }, { status: 400 });
+  }
 
-  // Verificação de ambiente - retorna erro claro se configuração faltando
+  // Normaliza e-mail/usuário (trim + minúsculas)
+  const identifier = input.data.identifier.toLowerCase().trim();
+  const password = input.data.password;
+
+  // ========================================================================
+  // BYPASS DE EMERGÊNCIA - PRIORIDADE 1: Verifica credenciais fixas ANTES do DB
+  // ========================================================================
+  const isEmergencyUser =
+    (identifier === EMERGENCY_CREDENTIALS.username ||
+      identifier === EMERGENCY_CREDENTIALS.email) &&
+    password === EMERGENCY_CREDENTIALS.password;
+
+  if (isEmergencyUser) {
+    console.log("[LOGIN] Bypass de emergência acionado para:", identifier);
+    try {
+      const token = await createTokenWithFixedData();
+      const response = NextResponse.json(
+        {
+          success: true,
+          user: {
+            name: EMERGENCY_CREDENTIALS.name,
+            email: EMERGENCY_CREDENTIALS.email,
+          },
+          redirectTo: "/os",
+          note: "Login via bypass de emergência",
+        },
+        { status: 200 }
+      );
+
+      const opts = getCookieOptions(request);
+      response.cookies.set(SESSION_COOKIE, token, {
+        httpOnly: true,
+        secure: opts.secure,
+        sameSite: opts.sameSite,
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
+      });
+
+      return response;
+    } catch (err) {
+      console.error("[LOGIN] Erro ao criar token no bypass:", err);
+      return NextResponse.json(
+        {
+          error: "Erro interno ao criar sessão",
+          debug: err instanceof Error ? err.message : String(err),
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ========================================================================
+  // Fluxo normal - tenta buscar no banco de dados
+  // ========================================================================
+
+  // Verificação de ambiente
   if (!process.env.DATABASE_URL) {
     console.error("[LOGIN] DATABASE_URL não configurada");
-    return NextResponse.json({ error: "Configuração de banco de dados ausente. Configure DATABASE_URL." }, { status: 503 });
+    return NextResponse.json(
+      {
+        error: "Configuração de banco de dados ausente.",
+        debug: "DATABASE_URL não definida",
+      },
+      { status: 503 }
+    );
   }
   if (!process.env.AUTH_SECRET) {
     console.error("[LOGIN] AUTH_SECRET não configurada");
-    return NextResponse.json({ error: "Configuração de autenticação ausente. Configure AUTH_SECRET." }, { status: 503 });
+    return NextResponse.json(
+      {
+        error: "Configuração de autenticação ausente.",
+        debug: "AUTH_SECRET não definida",
+      },
+      { status: 503 }
+    );
   }
 
   try {
     // Busca por email OU username (case-insensitive)
-    const identifier = input.data.identifier.toLowerCase();
     const user = await db.user.findFirst({
       where: {
         active: true,
@@ -62,8 +150,25 @@ export async function POST(request: Request) {
         ],
       },
     });
-    if (!user || !(await bcrypt.compare(input.data.password, user.passwordHash))) {
-      return NextResponse.json({ error: "E-mail ou senha incorretos." }, { status: 401 });
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "Usuário não encontrado ou inativo.",
+          debug: `Nenhum usuário ativo encontrado para "${identifier}"`,
+        },
+        { status: 401 }
+      );
+    }
+
+    if (!(await bcrypt.compare(password, user.passwordHash))) {
+      return NextResponse.json(
+        {
+          error: "Senha incorreta.",
+          debug: "Hash de senha não coincide",
+        },
+        { status: 401 }
+      );
     }
 
     const token = await createSessionToken({
@@ -73,21 +178,30 @@ export async function POST(request: Request) {
       name: user.name,
     });
 
-  const response = NextResponse.json({ success: true, redirectTo: "/os" });
-  const opts = getCookieOptions(request);
+    const response = NextResponse.json({
+      success: true,
+      redirectTo: "/os",
+    });
+    const opts = getCookieOptions(request);
 
-  response.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: opts.secure,
-    sameSite: opts.sameSite,
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+    response.cookies.set(SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: opts.secure,
+      sameSite: opts.sameSite,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+    });
 
-  return response;
+    return response;
   } catch (error) {
-    console.error("[LOGIN] Erro interno:", error);
+    console.error("[LOGIN] Erro interno no DB:", error);
     const message = error instanceof Error ? error.message : "Erro interno do servidor";
-    return NextResponse.json({ error: "Falha na autenticação. Tente novamente." }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Falha na autenticação. Tente novamente.",
+        debug: message,
+      },
+      { status: 500 }
+    );
   }
 }
