@@ -191,12 +191,14 @@ export default async function OsDashboardPage() {
     );
   } catch (error) {
     console.error("[OS Dashboard] Database error:", error);
+    const detail = error instanceof Error ? error.message : String(error);
     return (
       <div className="container-editorial py-6 sm:py-8">
         <div className="card-editorial text-center py-8">
-          <h1 className="text-xl font-bold text-navy-950 mb-2">Erro ao carregar dashboard</h1>
-          <p className="text-sm text-steel-500 mb-4">O sistema está sendo configurado. Tente novamente em alguns segundos.</p>
-          <Link href="/os/login" className="btn-primary">Ir para login</Link>
+          <h1 className="text-xl font-bold text-navy-950 mb-2">Painel temporariamente indisponível</h1>
+          <p className="text-sm text-steel-600 mb-2">Sua sessão está ativa, mas o painel não conseguiu ler os dados do banco.</p>
+          <p className="text-xs text-steel-500" role="status">Detalhe técnico: {detail}</p>
+          <Link href="/api/os/init-db" className="btn-primary mt-5">Verificar banco de dados</Link>
         </div>
       </div>
     );
